@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import AbstractContextManager
+import hashlib
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -19,6 +20,7 @@ from .lan_config import LanConfigError, load_lan_config
 from .lan_service import LanChatService
 from .lan_store import ImageStore
 from .lan_web import LanWebApplication
+from .session_hub import LanSessionHub
 from .session_projection import SessionProjection
 from .state_store import StateStore
 
@@ -82,6 +84,13 @@ def _share_urls(addresses, port: int) -> list[str]:
     ]
 
 
+def _session_state_path(runtime: Path, session_id: str | None) -> Path:
+    if not session_id:
+        return runtime / "state.json"
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
+    return runtime / "sessions" / f"{digest}.json"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="局域网共享 Codex 会话")
     parser.add_argument("--config", default="lan_config.toml")
@@ -105,30 +114,34 @@ def main(argv: list[str] | None = None) -> int:
     if config.host not in {"0.0.0.0", "::"}:
         allowed_hosts.add(config.host)
 
-    state = StateStore(runtime / "state.json")
-    if config.session_id:
-        state.set_thread_id(config.session_id)
     image_store = ImageStore(runtime / "uploads", config.max_image_bytes, config.max_images)
-    projection = SessionProjection(image_store.directory)
-    codex = CodexClient(
-        config.workspace,
-        state,
-        config.turn_timeout_seconds,
-        thread_name="局域网共享 Codex 会话",
-        remote_url=f"ws://127.0.0.1:{config.app_server_port}",
-        strict_resume=True,
-        sandbox_mode=config.permission_mode,
-    )
+    configured_sessions: tuple[str | None, ...] = config.session_ids or (None,)
+    services: list[LanChatService] = []
+    for index, session_id in enumerate(configured_sessions, start=1):
+        state = StateStore(_session_state_path(runtime, session_id))
+        if session_id:
+            state.set_thread_id(session_id)
+        projection = SessionProjection(image_store.directory)
+        codex = CodexClient(
+            config.workspace,
+            state,
+            config.turn_timeout_seconds,
+            thread_name=f"局域网共享 Codex 会话 {index}" if len(configured_sessions) > 1 else "局域网共享 Codex 会话",
+            remote_url=f"ws://127.0.0.1:{config.app_server_port}",
+            strict_resume=True,
+            sandbox_mode=config.permission_mode,
+        )
+        services.append(LanChatService(codex, projection, logging.getLogger(f"lan.service.{index}")))
     app_server = AppServerHost(
         "127.0.0.1",
         config.app_server_port,
         cwd=config.workspace,
         logger=logging.getLogger("lan.app_server"),
     )
-    service = LanChatService(codex, projection, logging.getLogger("lan.service"))
+    hub = LanSessionHub(services, logging.getLogger("lan.sessions"))
     request_limit = config.max_images * ((config.max_image_bytes + 2) // 3 * 4) + 1024 * 1024
     app = LanWebApplication(
-        service,
+        hub,
         image_store,
         allowed_hosts,
         max_request_bytes=request_limit,
@@ -141,14 +154,16 @@ def main(argv: list[str] | None = None) -> int:
         with SingleInstanceLock(runtime / "server.lock"):
             try:
                 app_server.start()
-                service.start()
+                hub.start()
                 server = app.create_server(config.host, config.port)
                 actual_port = int(server.server_address[1])
                 print("=" * 72)
                 print("局域网共享 Codex 会话已启动")
                 for url in _share_urls(addresses, actual_port):
                     print(f"分享地址：{url}")
-                print(f"Session ID：{service.thread_id}")
+                print(f"Session 数量：{len(hub.thread_ids)}")
+                for index, thread_id in enumerate(hub.thread_ids, start=1):
+                    print(f"Session {index}：{thread_id}")
                 print(f"本机 CLI：双击 open_lan_codex_cli.cmd（连接 127.0.0.1:{config.app_server_port}）")
                 print(f"工作目录：{config.workspace}")
                 print(f"权限：{config.permission_mode} / approval never")
@@ -165,14 +180,14 @@ def main(argv: list[str] | None = None) -> int:
                 server.serve_forever(poll_interval=0.5)
             except KeyboardInterrupt:
                 logging.info("正在关闭局域网共享 Codex 会话服务")
-            except (OSError, CodexClientError, AppServerHostError) as exc:
+            except (OSError, ValueError, CodexClientError, AppServerHostError) as exc:
                 logging.error("启动失败：%s", exc)
                 return 4
             finally:
                 if server:
                     server.stopping.set()  # type: ignore[attr-defined]
                     server.server_close()
-                service.close()
+                hub.close()
                 app_server.close()
     except RuntimeError as exc:
         logging.error("%s", exc)

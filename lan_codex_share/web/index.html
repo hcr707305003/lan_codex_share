@@ -68,6 +68,12 @@
           </div>
         </div>
         <div class="topbar-actions">
+          <label class="session-control" for="session-select">
+            <span>Session</span>
+            <select id="session-select" aria-label="选择共享 Session" disabled>
+              <option>正在读取</option>
+            </select>
+          </label>
           <div class="model-control" id="model-control">
             <button class="model-toggle" id="model-toggle" type="button" aria-label="调整模型" aria-expanded="false" aria-controls="model-panel" disabled>
               <span><small>模型</small><strong id="model-current">正在读取</strong></span>
@@ -100,12 +106,17 @@
         </div>
       </header>
 
-      <section class="timeline" id="timeline" role="feed" aria-label="Codex 会话内容">
-        <div class="initial-loading" id="initial-loading">
-          <span class="loading-ring" aria-hidden="true"></span>
-          <p>正在读取真实 Codex Session…</p>
-        </div>
-      </section>
+      <div class="timeline-shell">
+        <section class="timeline" id="timeline" role="feed" aria-label="Codex 会话内容">
+          <div class="initial-loading" id="initial-loading">
+            <span class="loading-ring" aria-hidden="true"></span>
+            <p>正在读取真实 Codex Session…</p>
+          </div>
+        </section>
+        <button class="scroll-to-bottom" id="scroll-to-bottom" type="button" aria-label="回到最新消息" title="回到最新消息" hidden>
+          <svg aria-hidden="true"><use href="#i-chevron"></use></svg>
+        </button>
+      </div>
 
       <footer class="composer-region">
         <div class="processing-banner" id="processing-banner" role="status" aria-live="polite" aria-atomic="true" hidden>
@@ -161,6 +172,17 @@
       </div>
     </aside>
   </div>
+
+  <dialog class="image-lightbox" id="image-lightbox" aria-labelledby="image-lightbox-title">
+    <h2 class="sr-only" id="image-lightbox-title">图片预览</h2>
+    <button class="icon-button image-lightbox-close" id="image-lightbox-close" type="button" aria-label="关闭图片预览" title="关闭">
+      <svg aria-hidden="true"><use href="#i-close"></use></svg>
+    </button>
+    <div class="image-lightbox-stage" id="image-lightbox-stage">
+      <img id="image-lightbox-image" alt="">
+      <p class="image-lightbox-error" id="image-lightbox-error" role="status" hidden>图片加载失败</p>
+    </div>
+  </dialog>
 
   <script src="/app.js" defer></script>
 </body>

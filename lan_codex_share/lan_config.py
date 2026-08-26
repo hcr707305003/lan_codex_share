@@ -23,8 +23,13 @@ class LanConfig:
     max_images: int = 4
     log_level: str = "INFO"
     preview_roots: tuple[Path, ...] = ()
-    session_id: str | None = None
+    session_ids: tuple[str, ...] = ()
     permission_mode: str = "danger-full-access"
+
+    @property
+    def session_id(self) -> str | None:
+        """Return the first configured session for legacy single-session callers."""
+        return self.session_ids[0] if self.session_ids else None
 
 
 def load_lan_config(path: str | Path) -> LanConfig:
@@ -64,10 +69,23 @@ def load_lan_config(path: str | Path) -> LanConfig:
     max_images = int(data.get("max_images", 4))
     if not 1 <= max_images <= 20:
         raise LanConfigError("max_images 必须在 1 到 20 之间")
-    session_id_raw = data.get("session_id", "")
-    if not isinstance(session_id_raw, str):
-        raise LanConfigError("session_id 必须是字符串")
-    session_id = session_id_raw.strip() or None
+    if "session_ids" in data and "session_id" in data:
+        raise LanConfigError("session_ids 与旧版 session_id 不能同时配置")
+    if "session_ids" in data:
+        session_ids_raw = data["session_ids"]
+        if not isinstance(session_ids_raw, list) or not all(isinstance(item, str) for item in session_ids_raw):
+            raise LanConfigError("session_ids 必须是 Session ID 字符串数组")
+        session_ids = tuple(item.strip() for item in session_ids_raw)
+        if any(not item for item in session_ids):
+            raise LanConfigError("session_ids 不能包含空字符串")
+        if len(set(session_ids)) != len(session_ids):
+            raise LanConfigError("session_ids 不能包含重复的 Session ID")
+    else:
+        session_id_raw = data.get("session_id", "")
+        if not isinstance(session_id_raw, str):
+            raise LanConfigError("session_id 必须是字符串")
+        session_id = session_id_raw.strip()
+        session_ids = (session_id,) if session_id else ()
     permission_mode_raw = data.get("permission_mode", "danger-full-access")
     if not isinstance(permission_mode_raw, str):
         raise LanConfigError("permission_mode 必须是字符串")
@@ -99,6 +117,6 @@ def load_lan_config(path: str | Path) -> LanConfig:
         max_images=max_images,
         log_level=str(data.get("log_level", "INFO")).upper(),
         preview_roots=tuple(preview_roots),
-        session_id=session_id,
+        session_ids=session_ids,
         permission_mode=permission_mode,
     )

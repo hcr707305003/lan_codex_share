@@ -25,6 +25,7 @@ def test_load_lan_config_defaults(tmp_path):
     assert config.max_image_bytes == 10 * 1024 * 1024
     assert config.max_images == 4
     assert config.preview_roots == ()
+    assert config.session_ids == ()
     assert config.session_id is None
     assert config.permission_mode == "danger-full-access"
 
@@ -40,7 +41,18 @@ def test_loads_session_and_permission_mode(tmp_path):
     config = load_lan_config(config_path)
 
     assert config.session_id == "session-test"
+    assert config.session_ids == ("session-test",)
     assert config.permission_mode == "workspace-write"
+
+
+def test_loads_multiple_sessions(tmp_path):
+    config_path = tmp_path / "lan_config.toml"
+    write_config(config_path, tmp_path, 'session_ids = ["session-a", "session-b"]\n')
+
+    config = load_lan_config(config_path)
+
+    assert config.session_ids == ("session-a", "session-b")
+    assert config.session_id == "session-a"
 
 
 def test_load_lan_config_preview_roots(tmp_path):
@@ -114,4 +126,21 @@ def test_rejects_non_string_session_id(tmp_path):
     write_config(config_path, tmp_path, "session_id = 42\n")
 
     with pytest.raises(LanConfigError, match="session_id"):
+        load_lan_config(config_path)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        'session_ids = ["session-a", 42]\n',
+        'session_ids = ["session-a", ""]\n',
+        'session_ids = ["session-a", "session-a"]\n',
+        'session_id = "legacy"\nsession_ids = ["session-a"]\n',
+    ],
+)
+def test_rejects_invalid_session_arrays(tmp_path, extra):
+    config_path = tmp_path / "lan_config.toml"
+    write_config(config_path, tmp_path, extra)
+
+    with pytest.raises(LanConfigError, match="session"):
         load_lan_config(config_path)

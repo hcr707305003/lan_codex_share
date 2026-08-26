@@ -16,9 +16,21 @@ class FakeService:
         self.model_updates = []
         self.subscribers = set()
 
-    def snapshot(self):
+    def resolve_session_id(self, session_id=None):
+        selected = session_id or "thread-web"
+        if selected != "thread-web":
+            raise ValueError("指定的 Session 不在共享列表中")
+        return selected
+
+    def snapshot(self, session_id=None):
+        selected = self.resolve_session_id(session_id)
         return {
             "thread_id": "thread-web",
+            "selected_session_id": selected,
+            "sessions": [{
+                "thread_id": "thread-web", "name": "Web Session", "status": "idle",
+                "connection": "connected", "queue_size": 0,
+            }],
             "status": "idle",
             "connection": "connected",
             "queue_size": 0,
@@ -38,28 +50,28 @@ class FakeService:
             },
         }
 
-    def submit(self, text, images, source_ip):
-        self.submitted.append((text, images, source_ip))
+    def submit(self, session_id, text, images, source_ip):
+        self.submitted.append((session_id, text, images, source_ip))
         return "message-1"
 
-    def cancel(self, source_ip):
-        self.cancelled.append(source_ip)
+    def cancel(self, session_id, source_ip):
+        self.cancelled.append((session_id, source_ip))
         return True
 
-    def cancel_queued(self, message_id, source_ip):
-        self.cancelled_queued.append((message_id, source_ip))
+    def cancel_queued(self, session_id, message_id, source_ip):
+        self.cancelled_queued.append((session_id, message_id, source_ip))
         return True
 
-    def clear_queued(self, source_ip):
-        self.cleared_queued.append(source_ip)
+    def clear_queued(self, session_id, source_ip):
+        self.cleared_queued.append((session_id, source_ip))
         return 2
 
-    def resync(self, source_ip):
-        self.resynced.append(source_ip)
+    def resync(self, session_id, source_ip):
+        self.resynced.append((session_id, source_ip))
         return True
 
-    def update_model_settings(self, model, reasoning_effort, service_tier, source_ip):
-        self.model_updates.append((model, reasoning_effort, service_tier, source_ip))
+    def update_model_settings(self, session_id, model, reasoning_effort, service_tier, source_ip):
+        self.model_updates.append((session_id, model, reasoning_effort, service_tier, source_ip))
         return {"model": model, "reasoning_effort": reasoning_effort, "service_tier": service_tier}
 
     def subscribe(self):
@@ -122,13 +134,30 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b'id="clear-queue"' in page
         assert b'id="processing-banner"' in page
         assert b'id="model-toggle"' in page
+        assert b'id="session-select"' in page
         assert b'id="speed-select"' in page
+        assert b'id="scroll-to-bottom"' in page
+        assert b'aria-label="\xe5\x9b\x9e\xe5\x88\xb0\xe6\x9c\x80\xe6\x96\xb0\xe6\xb6\x88\xe6\x81\xaf"' in page
+        assert b'id="image-lightbox"' in page
+        assert b'aria-label="\xe5\x85\xb3\xe9\x97\xad\xe5\x9b\xbe\xe7\x89\x87\xe9\xa2\x84\xe8\xa7\x88"' in page
         assert b'aria-atomic="true"' in page
         assert b'id="clear"' not in page
         assert dict(headers)["X-Content-Type-Options"] == "nosniff"
         assert "img-src 'self' data: blob:" in dict(headers)["Content-Security-Policy"]
 
-        assert request(server, "GET", "/style.css")[0] == 200
+        status, _, stylesheet = request(server, "GET", "/style.css")
+        assert status == 200
+        assert b"container-type: inline-size" in stylesheet
+        assert b".topbar-title-group > div" in stylesheet
+        assert b"@container (max-width: 640px)" in stylesheet
+        assert b"@media (min-width: 821px) and (max-width: 1199px)" in stylesheet
+        assert b"width: min(640px, calc(100vw - var(--sidebar-width)))" in stylesheet
+        assert b".main-panel { width: 100%; max-width: 100vw; height: 100dvh; }" in stylesheet
+        assert b"env(safe-area-inset-bottom)" in stylesheet
+        assert b".answer table, .file-markdown table" in stylesheet
+        assert b".answer img, .file-markdown img" in stylesheet
+        assert b"@media (max-width: 360px)" in stylesheet
+        assert b"grid-template-columns: minmax(0, 1fr)" in stylesheet
         status, _, script = request(server, "GET", "/app.js")
         assert status == 200
         assert b"reasoning" in script
@@ -140,16 +169,35 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b"processingBanner.hidden = !processing" in script
         assert b"Codex \xe5\xa4\x84\xe7\x90\x86\xe4\xb8\xad" in script
         assert b"/api/settings/model" in script
+        assert b"selectedSessionId" in script
+        assert b"previewReturnFocus" in script
+        assert b"resetOuterLayoutScroll" in script
+        assert b"element.scrollTop = 0" in script
+        assert b"filePreviewBody.scrollTop = Math.max(0, centeredTop)" in script
+        assert b"scrollIntoView" not in script
+        assert b"syncScrollToBottomButton" in script
+        assert b"behavior: reduceMotion ? 'auto' : 'smooth'" in script
+        assert b"timeline.addEventListener('scroll'" in script
+        assert b"openImageLightbox" in script
+        assert b"closeImageLightbox" in script
+        assert b"if (imageLightbox.open)" in script
+        assert b"event.preventDefault()" in script
+        assert b"imageLightbox.addEventListener('cancel'" in script
+        assert b"button.setAttribute('aria-label', `\xe6\x94\xbe\xe5\xa4\xa7\xe6\x9f\xa5\xe7\x9c\x8b ${label}`)" in script
 
         status, _, snapshot = request(server, "GET", "/api/snapshot")
         assert status == 200
         assert json.loads(snapshot)["thread_id"] == "thread-web"
+        status, _, snapshot = request(server, "GET", "/api/snapshot?session_id=thread-web")
+        assert status == 200
+        assert json.loads(snapshot)["selected_session_id"] == "thread-web"
+        assert request(server, "GET", "/api/snapshot?session_id=not-shared")[0] == 400
 
-        payload = json.dumps({"text": "hello", "images": []}).encode()
+        payload = json.dumps({"session_id": "thread-web", "text": "hello", "images": []}).encode()
         status, _, result = request(server, "POST", "/api/messages", payload, mutation_headers(server, app.csrf_token))
         assert status == 202
         assert json.loads(result)["message_id"] == "message-1"
-        assert service.submitted == [("hello", [], "127.0.0.1")]
+        assert service.submitted == [("thread-web", "hello", [], "127.0.0.1")]
     finally:
         server.shutdown()
         server.server_close()
@@ -203,13 +251,13 @@ def test_security_and_control_routes(tmp_path):
         assert json.loads(default_speed)["service_tier"] is None
         assert request(server, "POST", "/api/settings/model", b"{}", headers)[0] == 400
         assert request(server, "POST", "/api/history/clear", b"{}", headers)[0] == 410
-        assert service.cancelled == ["127.0.0.1"]
-        assert service.cancelled_queued == [("queued-1", "127.0.0.1")]
-        assert service.cleared_queued == ["127.0.0.1"]
-        assert service.resynced == ["127.0.0.1"]
+        assert service.cancelled == [("thread-web", "127.0.0.1")]
+        assert service.cancelled_queued == [("thread-web", "queued-1", "127.0.0.1")]
+        assert service.cleared_queued == [("thread-web", "127.0.0.1")]
+        assert service.resynced == [("thread-web", "127.0.0.1")]
         assert service.model_updates == [
-            ("gpt-5.6-sol", "high", "fast", "127.0.0.1"),
-            ("gpt-5.6-sol", "high", None, "127.0.0.1"),
+            ("thread-web", "gpt-5.6-sol", "high", "fast", "127.0.0.1"),
+            ("thread-web", "gpt-5.6-sol", "high", None, "127.0.0.1"),
         ]
     finally:
         server.shutdown()

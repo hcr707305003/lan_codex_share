@@ -6,7 +6,7 @@ from pathlib import Path
 import queue
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from .codex_client import CodexClientError, CodexTurnTimeout
 from .session_projection import SessionProjection
@@ -31,6 +31,7 @@ class LanChatService:
         self._worker = threading.Thread(target=self._work_loop, name="lan-codex-worker", daemon=True)
         self._subscribers: set[queue.Queue[int]] = set()
         self._subscriber_lock = threading.RLock()
+        self._change_handlers: list[Callable[[], None]] = []
         self._version_lock = threading.Lock()
         self._version = 0
         self._broadcast_interval = 0.075
@@ -87,9 +88,7 @@ class LanChatService:
         with self._version_lock:
             version = self._version
         connection = str(projected.get("connection") or "disconnected")
-        status = "reconnecting" if connection != "connected" else (
-            "processing" if self._active.is_set() or bool(getattr(self.codex, "thread_busy", False)) else "idle"
-        )
+        status = self._status(connection)
         with self._model_lock:
             model_catalog = deepcopy(self._model_catalog)
             model_settings = dict(self._model_settings)
@@ -106,6 +105,29 @@ class LanChatService:
             "last_error": self._last_error,
             "last_notice": self._last_notice,
         }
+
+    def summary(self) -> dict[str, Any]:
+        projected = self.projection.summary()
+        connection = str(projected.get("connection") or "disconnected")
+        thread = projected.get("thread", {})
+        return {
+            "thread_id": self.thread_id,
+            "name": thread.get("name") or thread.get("preview") or self.thread_id,
+            "status": self._status(connection),
+            "connection": connection,
+            "queue_size": self.queue_size,
+        }
+
+    def _status(self, connection: str) -> str:
+        if connection != "connected":
+            return "reconnecting"
+        if self._active.is_set() or bool(getattr(self.codex, "thread_busy", False)):
+            return "processing"
+        return "idle"
+
+    def add_change_handler(self, handler: Callable[[], None]) -> None:
+        with self._subscriber_lock:
+            self._change_handlers.append(handler)
 
     @property
     def queue_size(self) -> int:
@@ -141,6 +163,13 @@ class LanChatService:
                         subscriber.put_nowait(version)
                     except queue.Full:
                         pass
+            handlers = tuple(self._change_handlers)
+        for handler in handlers:
+            try:
+                handler()
+            except Exception as exc:
+                if self.logger:
+                    self.logger.warning("LAN session change handler failed: %s", type(exc).__name__)
 
     def _projection_changed(self) -> None:
         """Coalesce token-level App Server deltas before waking every browser."""

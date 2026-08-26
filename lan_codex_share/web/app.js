@@ -2,6 +2,7 @@
 
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 const timeline = document.getElementById('timeline');
+const scrollToBottomButton = document.getElementById('scroll-to-bottom');
 const input = document.getElementById('input');
 const imageInput = document.getElementById('images');
 const previews = document.getElementById('previews');
@@ -13,6 +14,7 @@ const sendButton = document.getElementById('send');
 const connectionPill = document.getElementById('connection-pill');
 const connectionLabel = document.getElementById('connection-label');
 const processingBanner = document.getElementById('processing-banner');
+const sessionSelect = document.getElementById('session-select');
 const modelControl = document.getElementById('model-control');
 const modelToggle = document.getElementById('model-toggle');
 const modelPanel = document.getElementById('model-panel');
@@ -33,26 +35,78 @@ const clearQueueButton = document.getElementById('clear-queue');
 const sidebar = document.getElementById('sidebar');
 const mobileScrim = document.getElementById('mobile-scrim');
 const appShell = document.querySelector('.app-shell');
+const mainPanel = document.querySelector('.main-panel');
 const filePreview = document.getElementById('file-preview');
 const filePreviewTitle = document.getElementById('file-preview-title');
 const filePreviewPath = document.getElementById('file-preview-path');
 const filePreviewBody = document.getElementById('file-preview-body');
+const imageLightbox = document.getElementById('image-lightbox');
+const imageLightboxTitle = document.getElementById('image-lightbox-title');
+const imageLightboxStage = document.getElementById('image-lightbox-stage');
+const imageLightboxImage = document.getElementById('image-lightbox-image');
+const imageLightboxError = document.getElementById('image-lightbox-error');
+const imageLightboxClose = document.getElementById('image-lightbox-close');
 
 let selectedFiles = [];
 let lastVersion = -1;
 let latestSnapshot = null;
+let selectedSessionId = new URL(window.location.href).searchParams.get('session') || '';
+let sessionOptionSignature = '';
+let selectionGeneration = 0;
 let composing = false;
 let refreshing = false;
 let refreshQueued = false;
 let dragDepth = 0;
 let currentFileReference = null;
+let previewReturnFocus = null;
 let previewRequestId = 0;
+let lightboxReturnFocus = null;
 const manuallyExpanded = new Set();
 const manuallyCollapsed = new Set();
 const allowedImageTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const maxImageBytes = 10 * 1024 * 1024;
 const maxImages = 4;
 const maxRenderedJson = 100 * 1024;
+const bottomRevealThreshold = 160;
+
+function timelineBottomDistance() {
+  return Math.max(0, timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight);
+}
+
+function syncScrollToBottomButton() {
+  const scrollable = timeline.scrollHeight > timeline.clientHeight + 1;
+  scrollToBottomButton.hidden = !scrollable || timelineBottomDistance() <= bottomRevealThreshold;
+}
+
+function scrollTimelineToBottom() {
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  timeline.scrollTo({top: timeline.scrollHeight, behavior: reduceMotion ? 'auto' : 'smooth'});
+}
+
+function openImageLightbox(src, name, trigger) {
+  lightboxReturnFocus = trigger;
+  const label = name || '会话图片';
+  imageLightboxTitle.textContent = label;
+  imageLightboxImage.alt = label;
+  imageLightboxImage.hidden = false;
+  imageLightboxError.hidden = true;
+  imageLightboxImage.src = src;
+  if (!imageLightbox.open) imageLightbox.showModal();
+  imageLightboxClose.focus({preventScroll: true});
+}
+
+function closeImageLightbox({restoreFocus = true} = {}) {
+  if (!imageLightbox.open) return;
+  const returnFocus = lightboxReturnFocus;
+  lightboxReturnFocus = null;
+  imageLightbox.close();
+  imageLightboxImage.removeAttribute('src');
+  imageLightboxError.hidden = true;
+  if (!restoreFocus) return;
+  const target = returnFocus?.isConnected ? returnFocus : timeline;
+  if (target === timeline) timeline.tabIndex = -1;
+  target.focus({preventScroll: true});
+}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -99,6 +153,43 @@ function displayTime(value) {
 function shortId(value) {
   const id = String(value || '');
   return id.length > 18 ? `${id.slice(0, 8)}…${id.slice(-6)}` : id;
+}
+
+function sessionStatusLabel(session) {
+  if (session.connection !== 'connected') return '连接中断';
+  if (session.status === 'processing') return '处理中';
+  const queued = Number(session.queue_size || 0);
+  return queued ? `排队 ${queued}` : '空闲';
+}
+
+function renderSessionSelector(snapshot) {
+  const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
+  const selected = String(snapshot.selected_session_id || snapshot.thread_id || '');
+  const signature = JSON.stringify(sessions.map(session => [
+    session.thread_id, session.name, session.status, session.connection, session.queue_size,
+  ]));
+  if (signature !== sessionOptionSignature) {
+    sessionOptionSignature = signature;
+    sessionSelect.replaceChildren();
+    for (const session of sessions) {
+      const option = document.createElement('option');
+      const id = String(session.thread_id || '');
+      const name = String(session.name || '').trim();
+      option.value = id;
+      option.textContent = `${name && name !== id ? `${name} · ` : ''}${shortId(id)} · ${sessionStatusLabel(session)}`;
+      option.title = `${name || 'Codex Session'}\n${id}\n${sessionStatusLabel(session)}`;
+      sessionSelect.append(option);
+    }
+  }
+  if (selected) {
+    selectedSessionId = selected;
+    sessionSelect.value = selected;
+    const url = new URL(window.location.href);
+    url.searchParams.set('session', selected);
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }
+  sessionSelect.disabled = sessions.length <= 1;
+  sessionSelect.setAttribute('aria-label', sessions.length > 1 ? `选择共享 Session，共 ${sessions.length} 个` : '当前共享 Session');
 }
 
 function clipText(value, limit = maxRenderedJson) {
@@ -269,16 +360,36 @@ function renderCodePreview(content, reference) {
   if (targetLine) {
     requestAnimationFrame(() => {
       const target = scroll.querySelector(`[data-line="${targetLine}"]`);
-      target?.scrollIntoView({block: 'center'});
+      if (target) {
+        const previewRect = filePreviewBody.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const centeredTop = filePreviewBody.scrollTop
+          + targetRect.top - previewRect.top
+          - (filePreviewBody.clientHeight - targetRect.height) / 2;
+        filePreviewBody.scrollTop = Math.max(0, centeredTop);
+      }
       if (reference.column) filePreviewBody.scrollLeft = Math.max(0, (reference.column - 1) * 8 - 120);
     });
   }
 }
 
+function resetOuterLayoutScroll() {
+  for (const element of [appShell, mainPanel, document.documentElement, document.body]) {
+    if (!element) continue;
+    element.scrollLeft = 0;
+    element.scrollTop = 0;
+  }
+}
+
 async function openFilePreview(reference) {
+  if (!appShell.classList.contains('preview-open')) {
+    const active = document.activeElement;
+    previewReturnFocus = active instanceof HTMLElement && !filePreview.contains(active) ? active : null;
+  }
   currentFileReference = reference;
   const requestId = ++previewRequestId;
   appShell.classList.add('preview-open');
+  resetOuterLayoutScroll();
   filePreview.setAttribute('aria-hidden', 'false');
   const filename = reference.path.split(/[\\/]/).pop() || '文件预览';
   filePreviewTitle.textContent = filename;
@@ -333,9 +444,20 @@ async function openFilePreview(reference) {
 }
 
 function closeFilePreview() {
+  if (!appShell.classList.contains('preview-open')) return;
   previewRequestId += 1;
+  const returnFocus = previewReturnFocus;
+  previewReturnFocus = null;
+  filePreviewBody.blur();
   appShell.classList.remove('preview-open');
   filePreview.setAttribute('aria-hidden', 'true');
+  resetOuterLayoutScroll();
+  requestAnimationFrame(() => {
+    const target = returnFocus?.isConnected ? returnFocus : timeline;
+    if (target === timeline) timeline.tabIndex = -1;
+    target.focus({preventScroll: true});
+    resetOuterLayoutScroll();
+  });
 }
 
 function userText(item) {
@@ -362,11 +484,18 @@ function imageRecords(item) {
 function renderGallery(images) {
   const gallery = el('div', 'gallery');
   for (const image of images) {
+    const src = `/api/images/${encodeURIComponent(image.id)}`;
+    const label = image.name || '会话图片';
+    const button = el('button', 'gallery-image');
+    button.type = 'button';
+    button.setAttribute('aria-label', `放大查看 ${label}`);
     const img = document.createElement('img');
-    img.src = `/api/images/${encodeURIComponent(image.id)}`;
-    img.alt = image.name || '会话图片';
+    img.src = src;
+    img.alt = label;
     img.loading = 'lazy';
-    gallery.append(img);
+    button.append(img);
+    button.addEventListener('click', () => openImageLightbox(src, label, button));
+    gallery.append(button);
   }
   return gallery;
 }
@@ -556,6 +685,7 @@ function renderTurn(turn) {
 
 function render(snapshot) {
   latestSnapshot = snapshot;
+  renderSessionSelector(snapshot);
   const thread = snapshot.thread || {};
   const connection = snapshot.connection || 'disconnected';
   const processing = snapshot.status === 'processing';
@@ -569,7 +699,7 @@ function render(snapshot) {
   connectionPill.className = `connection-pill ${processing ? 'processing' : connection}`;
   connectionLabel.textContent = connection !== 'connected' ? '连接断开' : processing ? 'Codex 处理中' : '已连接';
   processingBanner.hidden = !processing;
-  document.title = processing ? '处理中 · 局域网共享 Codex 会话' : '局域网共享 Codex 会话';
+  document.title = processing ? `处理中 · ${name}` : name;
   const queueSize = Number(snapshot.queue_size || 0);
   queueNode.textContent = `队列 ${queueSize}`;
   clearQueueButton.disabled = queueSize === 0;
@@ -594,6 +724,7 @@ function render(snapshot) {
   timeline.replaceChildren(fragment);
   if (nearBottom || previousTop === 0) timeline.scrollTop = timeline.scrollHeight;
   else timeline.scrollTop = previousTop;
+  syncScrollToBottomButton();
 }
 
 const effortLabels = {
@@ -669,10 +800,14 @@ function renderModelControls(snapshot, processing, queueSize) {
 async function refresh() {
   if (refreshing) { refreshQueued = true; return; }
   refreshing = true;
+  const generation = selectionGeneration;
   try {
-    const response = await fetch('/api/snapshot', {cache: 'no-store'});
-    if (!response.ok) throw new Error('无法读取共享会话');
-    render(await response.json());
+    const query = selectedSessionId ? `?session_id=${encodeURIComponent(selectedSessionId)}` : '';
+    const response = await fetch(`/api/snapshot${query}`, {cache: 'no-store'});
+    let snapshot = {};
+    try { snapshot = await response.json(); } catch (_) { /* use generic error */ }
+    if (!response.ok) throw new Error(snapshot.error || '无法读取共享会话');
+    if (generation === selectionGeneration) render(snapshot);
   } finally {
     refreshing = false;
     if (refreshQueued) { refreshQueued = false; refresh().catch(error => setNotice(error.message, true)); }
@@ -683,7 +818,7 @@ async function mutate(path, payload = {}) {
   const response = await fetch(path, {
     method: 'POST',
     headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
-    body: JSON.stringify(payload),
+    body: JSON.stringify({...payload, session_id: selectedSessionId || null}),
   });
   let result = {};
   try { result = await response.json(); } catch (_) { /* use generic error */ }
@@ -771,6 +906,25 @@ function closeMenu() { taskMenu.hidden = true; menuToggle.setAttribute('aria-exp
 function closeModelPanel() { modelPanel.hidden = true; modelToggle.setAttribute('aria-expanded', 'false'); }
 function closeSidebar() { sidebar.classList.remove('open'); mobileScrim.hidden = true; }
 
+sessionSelect.addEventListener('change', () => {
+  const next = sessionSelect.value;
+  if (!next || next === selectedSessionId) return;
+  selectedSessionId = next;
+  selectionGeneration += 1;
+  lastVersion = -1;
+  closeMenu(); closeModelPanel(); closeFilePreview(); closeImageLightbox({restoreFocus: false});
+  const loading = el('div', 'initial-loading');
+  const ring = el('span', 'loading-ring');
+  ring.setAttribute('aria-hidden', 'true');
+  loading.append(ring, el('p', '', '正在切换 Codex Session…'));
+  timeline.replaceChildren(loading);
+  const url = new URL(window.location.href);
+  url.searchParams.set('session', next);
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  setNotice(`正在切换到 ${shortId(next)}…`);
+  refresh().catch(error => setNotice(error.message, true));
+});
+
 imageInput.addEventListener('change', () => { addImageFiles(imageInput.files); imageInput.value = ''; });
 sendButton.addEventListener('click', sendCurrentMessage);
 input.addEventListener('input', updateSendState);
@@ -844,7 +998,31 @@ document.addEventListener('click', event => {
   if (!modelControl.contains(event.target)) closeModelPanel();
 });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape') { closeMenu(); closeModelPanel(); closeSidebar(); closeFilePreview(); }
+  if (event.key === 'Escape') {
+    if (imageLightbox.open) {
+      event.preventDefault();
+      closeImageLightbox();
+      return;
+    }
+    closeMenu(); closeModelPanel(); closeSidebar(); closeFilePreview();
+  }
+});
+
+imageLightboxClose.addEventListener('click', () => closeImageLightbox());
+imageLightbox.addEventListener('cancel', event => {
+  event.preventDefault();
+  closeImageLightbox();
+});
+imageLightbox.addEventListener('click', event => {
+  if (event.target === imageLightbox || event.target === imageLightboxStage) closeImageLightbox();
+});
+imageLightboxImage.addEventListener('load', () => {
+  imageLightboxImage.hidden = false;
+  imageLightboxError.hidden = true;
+});
+imageLightboxImage.addEventListener('error', () => {
+  imageLightboxImage.hidden = true;
+  imageLightboxError.hidden = false;
 });
 
 document.getElementById('file-preview-close').addEventListener('click', closeFilePreview);
@@ -899,6 +1077,8 @@ document.getElementById('cancel').addEventListener('click', async () => {
 document.getElementById('sidebar-toggle').addEventListener('click', () => { sidebar.classList.add('open'); mobileScrim.hidden = false; });
 document.getElementById('sidebar-close').addEventListener('click', closeSidebar);
 mobileScrim.addEventListener('click', closeSidebar);
+timeline.addEventListener('scroll', syncScrollToBottomButton, {passive: true});
+scrollToBottomButton.addEventListener('click', scrollTimelineToBottom);
 
 const events = new EventSource('/api/events');
 events.addEventListener('update', () => refresh().catch(error => setNotice(error.message, true)));
@@ -906,4 +1086,5 @@ events.onopen = () => { if (!latestSnapshot?.last_error) setNotice('已连接真
 events.onerror = () => setNotice('实时连接暂时断开，浏览器正在重连…', true);
 
 updateSendState();
+syncScrollToBottomButton();
 refresh().catch(error => setNotice(error.message, true));

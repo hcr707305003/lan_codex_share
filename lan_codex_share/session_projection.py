@@ -59,6 +59,19 @@ class SessionProjection:
                 "pending": deepcopy(self._pending),
             }
 
+    def summary(self) -> dict[str, Any]:
+        """Return lightweight thread metadata without copying the complete turn history."""
+        with self._lock:
+            thread = self._thread
+            return {
+                "connection": self._connection,
+                "thread": {
+                    key: deepcopy(thread.get(key))
+                    for key in ("id", "name", "preview", "cwd", "status")
+                    if key in thread
+                },
+            }
+
     def add_pending(
         self,
         text: str,

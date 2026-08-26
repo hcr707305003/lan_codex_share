@@ -120,7 +120,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self._serve_asset("style.css", "text/css; charset=utf-8")
                 return
             if path == "/api/snapshot":
-                self._json(HTTPStatus.OK, self.app.service.snapshot())
+                session_id = parse_qs(request_url.query, keep_blank_values=True).get("session_id", [None])[0]
+                self._json(HTTPStatus.OK, self.app.service.snapshot(session_id))
                 return
             if path == "/api/events":
                 self._serve_events()
@@ -135,6 +136,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.NOT_FOUND, "页面不存在")
         except AccessDenied as exc:
             self._error(HTTPStatus.FORBIDDEN, str(exc))
+        except ValueError as exc:
+            self._error(HTTPStatus.BAD_REQUEST, str(exc))
         except (BrokenPipeError, ConnectionResetError):
             return
         except FileNotFoundError:
@@ -208,30 +211,31 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 raise ValueError("JSON 必须是对象")
             path = urlsplit(self.path).path
             source_ip = str(self.client_address[0])
+            session_id = self.app.service.resolve_session_id(payload.get("session_id"))
             if path == "/api/messages":
                 raw_images = payload.get("images", [])
                 if not isinstance(raw_images, list):
                     raise ValueError("images 必须是数组")
                 images = self.app.image_store.save_many(raw_images)
-                message_id = self.app.service.submit(str(payload.get("text", "")), images, source_ip)
+                message_id = self.app.service.submit(session_id, str(payload.get("text", "")), images, source_ip)
                 self._json(HTTPStatus.ACCEPTED, {"message_id": message_id})
                 return
             if path == "/api/queue/cancel":
                 raw_message_id = payload.get("message_id")
                 if not isinstance(raw_message_id, str) or not raw_message_id.strip():
                     raise ValueError("message_id 不能为空")
-                cancelled = self.app.service.cancel_queued(raw_message_id.strip(), source_ip)
+                cancelled = self.app.service.cancel_queued(session_id, raw_message_id.strip(), source_ip)
                 self._json(HTTPStatus.OK, {"cancelled": cancelled})
                 return
             if path == "/api/queue/clear":
-                cleared = self.app.service.clear_queued(source_ip)
+                cleared = self.app.service.clear_queued(session_id, source_ip)
                 self._json(HTTPStatus.OK, {"cleared": cleared})
                 return
             if path == "/api/cancel":
-                self._json(HTTPStatus.OK, {"cancelled": self.app.service.cancel(source_ip)})
+                self._json(HTTPStatus.OK, {"cancelled": self.app.service.cancel(session_id, source_ip)})
                 return
             if path == "/api/resync":
-                self._json(HTTPStatus.OK, {"resynced": self.app.service.resync(source_ip)})
+                self._json(HTTPStatus.OK, {"resynced": self.app.service.resync(session_id, source_ip)})
                 return
             if path == "/api/settings/model":
                 raw_model = payload.get("model")
@@ -246,7 +250,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 service_tier = raw_service_tier.strip() if isinstance(raw_service_tier, str) else None
                 service_tier = service_tier or None
                 settings = self.app.service.update_model_settings(
-                    raw_model.strip(), raw_effort.strip(), service_tier, source_ip
+                    session_id, raw_model.strip(), raw_effort.strip(), service_tier, source_ip
                 )
                 self._json(HTTPStatus.OK, settings)
                 return

@@ -15,7 +15,7 @@ if not exist "lan_config.toml" (
   exit /b 2
 )
 
-".venv\Scripts\python.exe" -m lan_codex_share.lan_cli --config lan_config.toml
+".venv\Scripts\python.exe" -m lan_codex_share.lan_cli --config lan_config.toml %*
 set "CLI_EXIT=%ERRORLEVEL%"
 if not "%CLI_EXIT%"=="0" (
   echo.
