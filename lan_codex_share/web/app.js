@@ -14,6 +14,9 @@ const sendButton = document.getElementById('send');
 const connectionPill = document.getElementById('connection-pill');
 const connectionLabel = document.getElementById('connection-label');
 const processingBanner = document.getElementById('processing-banner');
+const queuePanel = document.getElementById('queue-panel');
+const queueCount = document.getElementById('queue-count');
+const queueList = document.getElementById('queue-list');
 const sessionControl = document.getElementById('session-control');
 const sessionSelect = document.getElementById('session-select');
 const projectList = document.getElementById('project-list');
@@ -582,8 +585,8 @@ function renderGallery(images) {
   return gallery;
 }
 
-function renderUserMessage(item, pending = false) {
-  const article = el('article', `message user${pending ? ' pending' : ''}`);
+function renderUserMessage(item) {
+  const article = el('article', 'message user');
   const meta = el('div', 'message-meta');
   meta.append(el('span', '', item.sourceIp || '用户'));
   const time = el('time', '', displayTime(item.createdAt));
@@ -594,19 +597,48 @@ function renderUserMessage(item, pending = false) {
   if (text) article.append(el('div', 'user-bubble', text));
   const images = imageRecords(item);
   if (images.length) article.append(renderGallery(images));
-  if (pending || (item.status && statusValue(item.status) !== 'completed')) {
+  if (item.status && statusValue(item.status) !== 'completed') {
     const footer = el('div', 'message-pending-footer');
     footer.append(el('span', `message-state ${statusValue(item.status)}`, stateLabel(item.status)));
-    if (pending && statusValue(item.status) === 'queued') {
-      const cancel = el('button', 'message-cancel', '取消');
-      cancel.type = 'button';
-      cancel.setAttribute('aria-label', '取消这条排队消息');
-      cancel.addEventListener('click', () => cancelQueuedMessage(String(item.id || ''), cancel));
-      footer.append(cancel);
-    }
     article.append(footer);
   }
   return article;
+}
+
+function renderQueue(pending) {
+  const items = Array.isArray(pending) ? pending : [];
+  queuePanel.hidden = items.length === 0;
+  queueCount.textContent = `${items.length} 条消息`;
+  if (!items.length) {
+    queueList.replaceChildren();
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  items.forEach((item, index) => {
+    const row = el('article', 'queue-item');
+    row.setAttribute('role', 'listitem');
+    row.append(el('span', 'queue-position', String(index + 1)));
+
+    const content = el('div', 'queue-content');
+    const text = userText(item).trim();
+    const images = imageRecords(item);
+    content.append(el('div', 'queue-text', text || (images.length ? `图片消息（${images.length} 张）` : '空消息')));
+    const meta = el('div', 'queue-meta');
+    meta.append(el('span', 'queue-source', item.sourceIp || '用户'));
+    if (item.createdAt) meta.append(el('span', '', displayTime(item.createdAt)));
+    if (images.length) meta.append(el('span', '', `${images.length} 张图片`));
+    content.append(meta);
+    row.append(content);
+
+    const cancel = el('button', 'queue-cancel', '取消');
+    cancel.type = 'button';
+    cancel.setAttribute('aria-label', `取消第 ${index + 1} 条排队消息`);
+    cancel.addEventListener('click', () => cancelQueuedMessage(String(item.id || ''), cancel));
+    row.append(cancel);
+    fragment.append(row);
+  });
+  queueList.replaceChildren(fragment);
 }
 
 async function cancelQueuedMessage(messageId, button) {
@@ -797,11 +829,12 @@ function render(snapshot) {
   const previousTop = timeline.scrollTop;
   const fragment = document.createDocumentFragment();
   const turns = thread.turns || [];
+  const pending = snapshot.pending || [];
+  renderQueue(pending);
   for (const turn of turns) fragment.append(renderTurn(turn));
-  for (const pending of snapshot.pending || []) fragment.append(renderUserMessage(pending, true));
-  if (!turns.length && !(snapshot.pending || []).length) {
+  if (!turns.length) {
     const empty = el('div', 'empty-state');
-    empty.append(el('p', '', '这个 Session 还没有消息。'));
+    empty.append(el('p', '', pending.length ? '排队消息会在开始处理后出现在这里。' : '这个 Session 还没有消息。'));
     fragment.append(empty);
   }
   timeline.replaceChildren(fragment);
@@ -1132,7 +1165,6 @@ document.getElementById('resync').addEventListener('click', async () => {
 });
 
 clearQueueButton.addEventListener('click', async () => {
-  closeMenu();
   const count = Number(latestSnapshot?.queue_size || 0);
   if (!count) return setNotice('排队列表为空。');
   if (!window.confirm(`确定清空 ${count} 条尚未开始的排队消息吗？`)) return;

@@ -101,7 +101,6 @@
             <div class="task-menu" id="task-menu" hidden>
               <button type="button" id="copy-session"><svg><use href="#i-copy"></use></svg><span>复制 Session ID</span></button>
               <button type="button" id="resync"><svg><use href="#i-refresh"></use></svg><span>重新同步</span></button>
-              <button type="button" id="clear-queue" class="danger" disabled><svg><use href="#i-trash"></use></svg><span>清空排队</span></button>
               <button type="button" id="cancel" class="danger"><svg><use href="#i-stop"></use></svg><span>取消当前任务</span></button>
             </div>
           </div>
@@ -129,6 +128,18 @@
           </div>
           <div class="processing-track" aria-hidden="true"><span></span></div>
         </div>
+        <section class="queue-panel" id="queue-panel" aria-labelledby="queue-title" hidden>
+          <header class="queue-panel-header">
+            <div class="queue-heading">
+              <strong id="queue-title">等待队列</strong>
+              <span id="queue-count" role="status" aria-live="polite" aria-atomic="true">0 条消息</span>
+            </div>
+            <button type="button" id="clear-queue" class="queue-clear" disabled>
+              <svg aria-hidden="true"><use href="#i-trash"></use></svg><span>清空</span>
+            </button>
+          </header>
+          <div class="queue-list" id="queue-list" role="list"></div>
+        </section>
         <div class="drop-mask" id="drop-mask" aria-hidden="true">松开以添加图片</div>
         <div class="previews" id="previews" aria-live="polite"></div>
         <div class="composer">

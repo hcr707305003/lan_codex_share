@@ -142,6 +142,9 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b'id="resync"' in page
         assert b'id="file-preview"' in page
         assert b'id="clear-queue"' in page
+        assert b'id="queue-panel"' in page
+        assert b'id="queue-count"' in page
+        assert b'id="queue-list"' in page
         assert b'id="processing-banner"' in page
         assert b'id="model-toggle"' in page
         assert b'id="project-list"' in page
@@ -172,6 +175,8 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b"grid-template-columns: minmax(0, 1fr)" in stylesheet
         assert b".project-group" in stylesheet
         assert b".session-control[hidden]" in stylesheet
+        assert b".queue-panel[hidden]" in stylesheet
+        assert b".queue-list" in stylesheet
         status, _, script = request(server, "GET", "/app.js")
         assert status == 200
         assert b"reasoning" in script
@@ -179,7 +184,8 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b"parseLocalFileTarget" in script
         assert b"/api/queue/cancel" in script
         assert b"/api/queue/clear" in script
-        assert b"statusValue(item.status) === 'queued'" in script
+        assert b"renderQueue(pending)" in script
+        assert b"fragment.append(renderUserMessage(pending, true))" not in script
         assert b"processingBanner.hidden = !processing" in script
         assert b"Codex \xe5\xa4\x84\xe7\x90\x86\xe4\xb8\xad" in script
         assert b"renderProjectNavigation" in script
