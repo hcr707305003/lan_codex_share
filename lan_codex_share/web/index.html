@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="__CSRF_TOKEN__">
+  <title>局域网共享 Codex 会话</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <svg class="svg-defs" aria-hidden="true">
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5h6l2-2h9v13h-17z"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6l-.3-2.6h-4L10.5 6A8 8 0 0 0 9 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 10.5 18l.3 2.6h4L15 18a8 8 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1z"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m9 17 7.5-7.5a3 3 0 0 0-4.2-4.2L4.8 12.8a5 5 0 0 0 7.1 7.1l7.5-7.5"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5m0 0-5 5m5-5 5 5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m5 7 4 5-4 5m7 0h7"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h5"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9.5 4.5A3.5 3.5 0 0 0 6 8v.4A3.5 3.5 0 0 0 6.5 15v.5A3.5 3.5 0 0 0 10 19h2V5zM14.5 4.5A3.5 3.5 0 0 1 18 8v.4a3.5 3.5 0 0 1-.5 6.6v.5A3.5 3.5 0 0 1 14 19h-2V5z"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.5 6.5a4 4 0 0 0-5 5L4 17l3 3 5.5-5.5a4 4 0 0 0 5-5l-2.5 2.5-3-3z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 3 3 2-2 4 4"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M18.5 10A7 7 0 0 0 6.3 6.3L4 8m2 6a7 7 0 0 0 11.7 3.7L20 16"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <div class="mobile-scrim" id="mobile-scrim" hidden></div>
+    <aside class="sidebar" id="sidebar" aria-label="任务导航">
+      <div class="brand-row">
+        <div class="codex-mark" aria-hidden="true">C</div>
+        <span>Codex</span>
+        <button class="icon-button sidebar-close" id="sidebar-close" type="button" aria-label="关闭任务导航">
+          <svg><use href="#i-close"></use></svg>
+        </button>
+      </div>
+      <button class="new-task" type="button" disabled title="该共享入口固定使用一个 Session">
+        <svg><use href="#i-plus"></use></svg><span>新任务</span>
+      </button>
+      <nav class="task-nav" aria-label="共享任务">
+        <div class="nav-label">共享任务</div>
+        <button class="task-entry active" type="button" aria-current="page">
+          <span class="task-name" id="sidebar-title">局域网共享 Codex 会话</span>
+          <span class="task-id" id="sidebar-thread">正在连接…</span>
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-row"><svg><use href="#i-folder"></use></svg><span id="workspace-name">workspace</span></div>
+        <div class="sidebar-row muted"><svg><use href="#i-settings"></use></svg><span>完全权限</span></div>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="topbar">
+        <div class="topbar-title-group">
+          <button class="icon-button sidebar-toggle" id="sidebar-toggle" type="button" aria-label="打开任务导航">
+            <svg><use href="#i-panel"></use></svg>
+          </button>
+          <div>
+            <h1 id="thread-title">局域网共享 Codex 会话</h1>
+            <div class="workspace-path" id="workspace-path">正在读取真实 Session</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="model-control" id="model-control">
+            <button class="model-toggle" id="model-toggle" type="button" aria-label="调整模型" aria-expanded="false" aria-controls="model-panel" disabled>
+              <span><small>模型</small><strong id="model-current">正在读取</strong></span>
+              <svg aria-hidden="true"><use href="#i-chevron"></use></svg>
+            </button>
+            <div class="model-panel" id="model-panel" hidden>
+              <div class="model-panel-title"><strong>模型设置</strong><span>应用到这个 Session 的后续任务</span></div>
+              <label for="model-select">模型</label>
+              <select id="model-select"></select>
+              <label for="effort-select">思考强度</label>
+              <select id="effort-select"></select>
+              <label for="speed-select">速度</label>
+              <select id="speed-select"></select>
+              <p id="model-help">选择模型、思考强度和速度。</p>
+              <button class="model-apply" id="model-apply" type="button">应用到后续任务</button>
+            </div>
+          </div>
+          <div class="connection-pill" id="connection-pill"><span class="status-dot"></span><span id="connection-label">正在连接</span></div>
+          <div class="menu-wrap">
+            <button class="icon-button" id="menu-toggle" type="button" aria-label="打开任务菜单" aria-expanded="false">
+              <svg><use href="#i-more"></use></svg>
+            </button>
+            <div class="task-menu" id="task-menu" hidden>
+              <button type="button" id="copy-session"><svg><use href="#i-copy"></use></svg><span>复制 Session ID</span></button>
+              <button type="button" id="resync"><svg><use href="#i-refresh"></use></svg><span>重新同步</span></button>
+              <button type="button" id="clear-queue" class="danger" disabled><svg><use href="#i-trash"></use></svg><span>清空排队</span></button>
+              <button type="button" id="cancel" class="danger"><svg><use href="#i-stop"></use></svg><span>取消当前任务</span></button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="timeline" id="timeline" role="feed" aria-label="Codex 会话内容">
+        <div class="initial-loading" id="initial-loading">
+          <span class="loading-ring" aria-hidden="true"></span>
+          <p>正在读取真实 Codex Session…</p>
+        </div>
+      </section>
+
+      <footer class="composer-region">
+        <div class="processing-banner" id="processing-banner" role="status" aria-live="polite" aria-atomic="true" hidden>
+          <span class="processing-spinner" aria-hidden="true"></span>
+          <div class="processing-copy">
+            <strong>Codex 正在处理任务</strong>
+            <span>进度会实时同步到所有已打开页面</span>
+          </div>
+          <div class="processing-track" aria-hidden="true"><span></span></div>
+        </div>
+        <div class="drop-mask" id="drop-mask" aria-hidden="true">松开以添加图片</div>
+        <div class="previews" id="previews" aria-live="polite"></div>
+        <div class="composer">
+          <label class="sr-only" for="input">给 Codex 发送消息</label>
+          <textarea id="input" rows="2" placeholder="给 Codex 发送消息" autocomplete="off"></textarea>
+          <div class="composer-toolbar">
+            <div class="composer-left">
+              <label class="icon-button attach-button" for="images" title="添加图片">
+                <svg><use href="#i-paperclip"></use></svg><span class="sr-only">添加图片</span>
+              </label>
+              <input id="images" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+              <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
+            </div>
+            <button class="send-button" id="send" type="button" aria-label="发送消息">
+              <svg><use href="#i-send"></use></svg>
+            </button>
+          </div>
+        </div>
+        <div class="footer-status">
+          <span id="notice" role="status" aria-live="polite">同一局域网内无需登录，访问者拥有完全权限。</span>
+          <span id="queue">队列 0</span>
+        </div>
+      </footer>
+    </main>
+
+    <aside class="file-preview" id="file-preview" aria-label="文件预览" aria-hidden="true">
+      <header class="file-preview-header">
+        <div class="file-preview-heading">
+          <strong id="file-preview-title">文件预览</strong>
+          <span id="file-preview-path"></span>
+        </div>
+        <div class="file-preview-actions">
+          <button class="icon-button" id="file-preview-refresh" type="button" aria-label="刷新文件预览" title="刷新">
+            <svg><use href="#i-refresh"></use></svg>
+          </button>
+          <button class="icon-button" id="file-preview-close" type="button" aria-label="关闭文件预览" title="关闭">
+            <svg><use href="#i-close"></use></svg>
+          </button>
+        </div>
+      </header>
+      <div class="file-preview-body" id="file-preview-body" tabindex="0">
+        <div class="file-preview-state">选择会话中的本地文件链接进行预览。</div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

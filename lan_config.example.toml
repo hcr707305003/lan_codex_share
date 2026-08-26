@@ -1,0 +1,11 @@
+workspace = "../workspace"
+session_id = ""
+permission_mode = "danger-full-access"
+host = "0.0.0.0"
+port = 8765
+app_server_port = 4500
+turn_timeout_seconds = 1800
+max_image_bytes = 10485760
+max_images = 4
+log_level = "INFO"
+preview_roots = []

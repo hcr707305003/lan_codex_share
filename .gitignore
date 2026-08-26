@@ -1,0 +1,16 @@
+.venv/
+lan_config.toml
+lan_config.local.toml
+runtime/*
+!runtime/.gitkeep
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.log
+*.lock
+*.tmp
+.env
+.env.*
+!.env.example
+.bug-hunter/
+.superpowers/
