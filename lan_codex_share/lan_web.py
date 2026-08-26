@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 import queue
 import secrets
+import sys
 import threading
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
@@ -14,6 +15,18 @@ from urllib.parse import parse_qs, quote, urlsplit
 from .lan_access import AccessDenied, is_lan_client, validate_host, validate_mutating_request
 from .lan_store import ImageStore, ImageValidationError
 from .workspace_files import WorkspaceFileError, WorkspaceFileViewer
+
+
+class LanThreadingHTTPServer(ThreadingHTTPServer):
+    logger = logging.getLogger(__name__)
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        error = sys.exception()
+        if isinstance(error, (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            suffix = f"（WinError {error.winerror}）" if getattr(error, "winerror", None) is not None else ""
+            self.logger.info("客户端 %s:%s 已断开连接%s", client_address[0], client_address[1], suffix)
+            return
+        super().handle_error(request, client_address)
 
 
 class LanWebApplication:
@@ -41,8 +54,9 @@ class LanWebApplication:
         self.file_viewer = WorkspaceFileViewer(workspace or Path.cwd(), preview_roots=preview_roots)
 
     def create_server(self, host: str, port: int) -> ThreadingHTTPServer:
-        server = ThreadingHTTPServer((host, port), LanRequestHandler)
+        server = LanThreadingHTTPServer((host, port), LanRequestHandler)
         server.daemon_threads = True
+        server.logger = self.logger
         server.app = self  # type: ignore[attr-defined]
         server.stopping = threading.Event()  # type: ignore[attr-defined]
         return server

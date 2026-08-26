@@ -1,11 +1,13 @@
 import http.client
 import json
+import logging
+from http.server import ThreadingHTTPServer
 import threading
 
 import pytest
 
 from lan_codex_share.lan_store import ImageStore
-from lan_codex_share.lan_web import LanWebApplication
+from lan_codex_share.lan_web import LanThreadingHTTPServer, LanWebApplication
 
 
 class FakeService:
@@ -132,6 +134,51 @@ def mutation_headers(server, csrf):
         "Content-Type": "application/json",
         "X-CSRF-Token": csrf,
     }
+
+
+@pytest.mark.parametrize("error", [ConnectionAbortedError(), ConnectionResetError(), BrokenPipeError()])
+def test_server_logs_expected_client_disconnect_without_traceback(tmp_path, monkeypatch, caplog, error):
+    app, _, server, thread = start_app(tmp_path)
+    parent_calls = []
+    monkeypatch.setattr(ThreadingHTTPServer, "handle_error", lambda *args: parent_calls.append(args))
+    if isinstance(error, ConnectionAbortedError):
+        error.winerror = 10053
+    caplog.set_level(logging.INFO, logger=app.logger.name)
+    try:
+        try:
+            raise error
+        except Exception:
+            server.handle_error(None, ("192.168.1.240", 3864))
+
+        assert isinstance(server, LanThreadingHTTPServer)
+        assert parent_calls == []
+        assert caplog.records[-1].getMessage() == (
+            "客户端 192.168.1.240:3864 已断开连接（WinError 10053）"
+            if isinstance(error, ConnectionAbortedError)
+            else "客户端 192.168.1.240:3864 已断开连接"
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+
+
+def test_server_delegates_unexpected_errors_to_default_handler(tmp_path, monkeypatch):
+    _, _, server, thread = start_app(tmp_path)
+    parent_calls = []
+    monkeypatch.setattr(ThreadingHTTPServer, "handle_error", lambda *args: parent_calls.append(args))
+    try:
+        try:
+            raise RuntimeError("unexpected")
+        except RuntimeError:
+            server.handle_error(None, ("192.168.1.240", 3864))
+
+        assert len(parent_calls) == 1
+        assert parent_calls[0][1:] == (None, ("192.168.1.240", 3864))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
 
 
 def test_web_application_rejects_missing_frozen_assets(tmp_path, monkeypatch):
