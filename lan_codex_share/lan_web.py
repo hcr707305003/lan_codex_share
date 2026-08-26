@@ -158,6 +158,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
 
     def _serve_workspace_file(self, raw_path: str) -> None:
         try:
+            if hasattr(self.app.service, "preview_roots"):
+                self.app.file_viewer.set_dynamic_roots(self.app.service.preview_roots)
             preview = self.app.file_viewer.open(raw_path)
         except WorkspaceFileError as exc:
             self._error(exc.status, str(exc))

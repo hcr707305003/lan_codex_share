@@ -113,6 +113,86 @@ def _session_state_path(runtime: Path, session_id: str | None) -> Path:
     return runtime / "sessions" / f"{digest}.json"
 
 
+def _chat_service(
+    config,
+    runtime: Path,
+    image_store: ImageStore,
+    session_id: str | None,
+    *,
+    workspace: Path | None = None,
+    label: str = "局域网共享 Codex 会话",
+    logger_name: str = "lan.service",
+) -> LanChatService:
+    state = StateStore(_session_state_path(runtime, session_id))
+    if session_id:
+        state.set_thread_id(session_id)
+    projection = SessionProjection(image_store.directory)
+    codex = CodexClient(
+        workspace or config.workspace,
+        state,
+        config.turn_timeout_seconds,
+        thread_name=label,
+        remote_url=f"ws://127.0.0.1:{config.app_server_port}",
+        strict_resume=True,
+        sandbox_mode=config.permission_mode,
+    )
+    return LanChatService(codex, projection, logging.getLogger(logger_name))
+
+
+def _build_session_hub(config, runtime: Path, image_store: ImageStore) -> LanSessionHub:
+    if config.discover_all_sessions:
+        catalog = CodexClient(
+            config.workspace,
+            StateStore(runtime / "catalog.json"),
+            config.turn_timeout_seconds,
+            remote_url=f"ws://127.0.0.1:{config.app_server_port}",
+            strict_resume=True,
+            sandbox_mode=config.permission_mode,
+            logger=logging.getLogger("lan.catalog.client"),
+        )
+
+        def create_service(metadata):
+            session_id = str(metadata.get("id") or "").strip()
+            raw_cwd = metadata.get("cwd")
+            if not session_id or not isinstance(raw_cwd, str) or not raw_cwd.strip():
+                raise ValueError("Session 目录缺少 ID 或工作目录")
+            workspace = Path(raw_cwd).expanduser().resolve()
+            if not workspace.is_dir():
+                raise ValueError(f"Session 工作目录不存在：{workspace}")
+            label = str(metadata.get("name") or metadata.get("preview") or "Codex Session")
+            return _chat_service(
+                config,
+                runtime,
+                image_store,
+                session_id,
+                workspace=workspace,
+                label=label,
+                logger_name=f"lan.service.{hashlib.sha256(session_id.encode('utf-8')).hexdigest()[:8]}",
+            )
+
+        return LanSessionHub(
+            catalog_client=catalog,
+            service_factory=create_service,
+            logger=logging.getLogger("lan.sessions"),
+        )
+
+    configured_sessions: tuple[str | None, ...] = (
+        config.session_ids if config.session_ids else (None,)
+    )
+    services = [
+        _chat_service(
+            config,
+            runtime,
+            image_store,
+            session_id,
+            label=f"局域网共享 Codex 会话 {index}" if len(configured_sessions) > 1 else "局域网共享 Codex 会话",
+            logger_name=f"lan.service.{index}",
+        )
+        for index, session_id in enumerate(configured_sessions, start=1)
+    ]
+    return LanSessionHub(services, logging.getLogger("lan.sessions"))
+
+
 def run(config_path: str | Path) -> int:
     config_path = Path(config_path).expanduser().resolve()
     runtime = config_path.parent / "runtime" / "lan"
@@ -134,30 +214,13 @@ def run(config_path: str | Path) -> int:
         allowed_hosts.add(config.host)
 
     image_store = ImageStore(runtime / "uploads", config.max_image_bytes, config.max_images)
-    configured_sessions: tuple[str | None, ...] = config.session_ids or (None,)
-    services: list[LanChatService] = []
-    for index, session_id in enumerate(configured_sessions, start=1):
-        state = StateStore(_session_state_path(runtime, session_id))
-        if session_id:
-            state.set_thread_id(session_id)
-        projection = SessionProjection(image_store.directory)
-        codex = CodexClient(
-            config.workspace,
-            state,
-            config.turn_timeout_seconds,
-            thread_name=f"局域网共享 Codex 会话 {index}" if len(configured_sessions) > 1 else "局域网共享 Codex 会话",
-            remote_url=f"ws://127.0.0.1:{config.app_server_port}",
-            strict_resume=True,
-            sandbox_mode=config.permission_mode,
-        )
-        services.append(LanChatService(codex, projection, logging.getLogger(f"lan.service.{index}")))
     app_server = AppServerHost(
         "127.0.0.1",
         config.app_server_port,
         cwd=config.workspace,
         logger=logging.getLogger("lan.app_server"),
     )
-    hub = LanSessionHub(services, logging.getLogger("lan.sessions"))
+    hub = _build_session_hub(config, runtime, image_store)
     request_limit = config.max_images * ((config.max_image_bytes + 2) // 3 * 4) + 1024 * 1024
     app = LanWebApplication(
         hub,
@@ -180,6 +243,7 @@ def run(config_path: str | Path) -> int:
                 print("局域网共享 Codex 会话已启动")
                 for url in _share_urls(addresses, actual_port):
                     print(f"分享地址：{url}")
+                print(f"共享模式：{'全部 Session（项目分组）' if config.discover_all_sessions else '固定/自动 Session'}")
                 print(f"Session 数量：{len(hub.thread_ids)}")
                 for index, thread_id in enumerate(hub.thread_ids, start=1):
                     print(f"Session {index}：{thread_id}")

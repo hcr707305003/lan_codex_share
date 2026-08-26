@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 
 sys.stdin.reconfigure(encoding="utf-8")
@@ -81,6 +82,23 @@ for line in sys.stdin:
             "status": {"type": "idle"},
             "turns": [{"id": "turn-history", "status": "completed", "items": [{"id": "history-answer", "type": "agentMessage", "text": "history"}]}] if params.get("includeTurns") else [],
         }}})
+    elif method == "thread/list":
+        send({"id": request_id, "result": {
+            "data": [{
+                "id": "thread-fake",
+                "sessionId": "thread-fake",
+                "name": thread_name,
+                "preview": "history",
+                "cwd": os.getcwd(),
+                "projectId": "project-fake",
+                "parentThreadId": None,
+                "ephemeral": False,
+                "status": {"type": "idle"},
+                "createdAt": 1,
+                "updatedAt": 2,
+            }],
+            "nextCursor": None,
+        }})
     elif method == "turn/start":
         if params.get("additionalContext") and not experimental_api:
             send({

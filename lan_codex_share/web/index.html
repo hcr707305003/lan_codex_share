@@ -45,10 +45,12 @@
       </button>
       <nav class="task-nav" aria-label="共享任务">
         <div class="nav-label">共享任务</div>
-        <button class="task-entry active" type="button" aria-current="page">
-          <span class="task-name" id="sidebar-title">局域网共享 Codex 会话</span>
-          <span class="task-id" id="sidebar-thread">正在连接…</span>
-        </button>
+        <div class="project-list" id="project-list" aria-live="polite">
+          <button class="task-entry active" type="button" aria-current="page">
+            <span class="task-name" id="sidebar-title">局域网共享 Codex 会话</span>
+            <span class="task-id" id="sidebar-thread">正在连接…</span>
+          </button>
+        </div>
       </nav>
       <div class="sidebar-footer">
         <div class="sidebar-row"><svg><use href="#i-folder"></use></svg><span id="workspace-name">workspace</span></div>
@@ -68,7 +70,7 @@
           </div>
         </div>
         <div class="topbar-actions">
-          <label class="session-control" for="session-select">
+          <label class="session-control" id="session-control" for="session-select">
             <span>Session</span>
             <select id="session-select" aria-label="选择共享 Session" disabled>
               <option>正在读取</option>

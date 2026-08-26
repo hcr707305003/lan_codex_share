@@ -144,6 +144,8 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b'id="clear-queue"' in page
         assert b'id="processing-banner"' in page
         assert b'id="model-toggle"' in page
+        assert b'id="project-list"' in page
+        assert b'id="session-control"' in page
         assert b'id="session-select"' in page
         assert b'id="speed-select"' in page
         assert b'id="scroll-to-bottom"' in page
@@ -168,6 +170,8 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b".answer img, .file-markdown img" in stylesheet
         assert b"@media (max-width: 360px)" in stylesheet
         assert b"grid-template-columns: minmax(0, 1fr)" in stylesheet
+        assert b".project-group" in stylesheet
+        assert b".session-control[hidden]" in stylesheet
         status, _, script = request(server, "GET", "/app.js")
         assert status == 200
         assert b"reasoning" in script
@@ -178,6 +182,8 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b"statusValue(item.status) === 'queued'" in script
         assert b"processingBanner.hidden = !processing" in script
         assert b"Codex \xe5\xa4\x84\xe7\x90\x86\xe4\xb8\xad" in script
+        assert b"renderProjectNavigation" in script
+        assert b"collapsedProjects" in script
         assert b"/api/settings/model" in script
         assert b"selectedSessionId" in script
         assert b"previewReturnFocus" in script

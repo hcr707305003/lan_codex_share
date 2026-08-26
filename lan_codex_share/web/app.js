@@ -14,7 +14,9 @@ const sendButton = document.getElementById('send');
 const connectionPill = document.getElementById('connection-pill');
 const connectionLabel = document.getElementById('connection-label');
 const processingBanner = document.getElementById('processing-banner');
+const sessionControl = document.getElementById('session-control');
 const sessionSelect = document.getElementById('session-select');
+const projectList = document.getElementById('project-list');
 const modelControl = document.getElementById('model-control');
 const modelToggle = document.getElementById('model-toggle');
 const modelPanel = document.getElementById('model-panel');
@@ -52,6 +54,7 @@ let lastVersion = -1;
 let latestSnapshot = null;
 let selectedSessionId = new URL(window.location.href).searchParams.get('session') || '';
 let sessionOptionSignature = '';
+let projectNavigationSignature = '';
 let selectionGeneration = 0;
 let composing = false;
 let refreshing = false;
@@ -63,6 +66,7 @@ let previewRequestId = 0;
 let lightboxReturnFocus = null;
 const manuallyExpanded = new Set();
 const manuallyCollapsed = new Set();
+const collapsedProjects = new Set();
 const allowedImageTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const maxImageBytes = 10 * 1024 * 1024;
 const maxImages = 4;
@@ -156,15 +160,93 @@ function shortId(value) {
 }
 
 function sessionStatusLabel(session) {
-  if (session.connection !== 'connected') return '连接中断';
+  if (session.connection === 'error') return '加载失败';
   if (session.status === 'processing') return '处理中';
   const queued = Number(session.queue_size || 0);
-  return queued ? `排队 ${queued}` : '空闲';
+  if (queued) return `排队 ${queued}`;
+  if (session.connection === 'not_loaded') return '未连接';
+  if (session.connection !== 'connected') return '连接中断';
+  return '空闲';
+}
+
+function sessionNavigationState(session) {
+  if (session.connection === 'error') return 'error';
+  if (session.status === 'processing') return 'processing';
+  if (session.connection === 'not_loaded') return 'not-loaded';
+  if (session.connection !== 'connected') return 'disconnected';
+  return 'idle';
+}
+
+function renderProjectNavigation(snapshot, selected) {
+  const catalogMode = snapshot.catalog_mode === true;
+  sessionControl.hidden = catalogMode;
+  if (!catalogMode) return;
+  const projects = Array.isArray(snapshot.projects) ? snapshot.projects : [];
+  const signature = JSON.stringify([selected, projects.map(project => [
+    project.id, project.name, project.cwd,
+    (project.sessions || []).map(session => [
+      session.thread_id, session.name, session.status, session.connection, session.queue_size, session.error,
+    ]),
+  ])]);
+  if (signature === projectNavigationSignature) return;
+  projectNavigationSignature = signature;
+  const fragment = document.createDocumentFragment();
+  for (const project of projects) {
+    const projectId = String(project.id || project.cwd || project.name || 'project');
+    const sessions = Array.isArray(project.sessions) ? project.sessions : [];
+    const details = el('details', 'project-group');
+    details.open = !collapsedProjects.has(projectId);
+    const summary = document.createElement('summary');
+    summary.title = String(project.cwd || project.name || 'Codex 项目');
+    summary.append(icon('chevron'));
+    summary.append(el('span', 'project-heading', project.name || '未分配项目'));
+    summary.append(el('span', 'project-count', String(sessions.length)));
+    details.append(summary);
+    const sessionNodes = el('div', 'project-sessions');
+    for (const session of sessions) {
+      const id = String(session.thread_id || '');
+      if (!id) continue;
+      const button = el('button', `task-entry${id === selected ? ' active' : ''}`);
+      button.type = 'button';
+      button.dataset.sessionId = id;
+      button.dataset.state = sessionNavigationState(session);
+      if (id === selected) button.setAttribute('aria-current', 'page');
+      const name = String(session.name || id);
+      const status = sessionStatusLabel(session);
+      button.title = `${name}\n${id}\n${status}`;
+      button.append(el('span', 'task-name', name));
+      button.append(el('span', 'task-id', `${shortId(id)} · ${status}`));
+      button.addEventListener('click', () => {
+        selectSession(id);
+        closeSidebar();
+      });
+      sessionNodes.append(button);
+    }
+    details.append(sessionNodes);
+    details.addEventListener('toggle', () => {
+      if (details.open) collapsedProjects.delete(projectId);
+      else collapsedProjects.add(projectId);
+    });
+    fragment.append(details);
+  }
+  if (!projects.length) fragment.append(el('div', 'empty-state sidebar-empty', '没有可共享的 Codex Session'));
+  projectList.replaceChildren(fragment);
 }
 
 function renderSessionSelector(snapshot) {
   const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
   const selected = String(snapshot.selected_session_id || snapshot.thread_id || '');
+  renderProjectNavigation(snapshot, selected);
+  if (snapshot.catalog_mode === true) {
+    if (selected) {
+      selectedSessionId = selected;
+      const url = new URL(window.location.href);
+      url.searchParams.set('session', selected);
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+    return;
+  }
+  sessionControl.hidden = false;
   const signature = JSON.stringify(sessions.map(session => [
     session.thread_id, session.name, session.status, session.connection, session.queue_size,
   ]));
@@ -706,6 +788,7 @@ function render(snapshot) {
   renderModelControls(snapshot, processing, queueSize);
   updateSendState();
   if (snapshot.last_error) setNotice(snapshot.last_error, true);
+  else if (snapshot.catalog_error) setNotice(snapshot.catalog_error, true);
   else if (snapshot.last_notice) setNotice(snapshot.last_notice);
 
   if (snapshot.version === lastVersion) return;
@@ -906,8 +989,7 @@ function closeMenu() { taskMenu.hidden = true; menuToggle.setAttribute('aria-exp
 function closeModelPanel() { modelPanel.hidden = true; modelToggle.setAttribute('aria-expanded', 'false'); }
 function closeSidebar() { sidebar.classList.remove('open'); mobileScrim.hidden = true; }
 
-sessionSelect.addEventListener('change', () => {
-  const next = sessionSelect.value;
+function selectSession(next) {
   if (!next || next === selectedSessionId) return;
   selectedSessionId = next;
   selectionGeneration += 1;
@@ -923,7 +1005,9 @@ sessionSelect.addEventListener('change', () => {
   window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   setNotice(`正在切换到 ${shortId(next)}…`);
   refresh().catch(error => setNotice(error.message, true));
-});
+}
+
+sessionSelect.addEventListener('change', () => selectSession(sessionSelect.value));
 
 imageInput.addEventListener('change', () => { addImageFiles(imageInput.files); imageInput.value = ''; });
 sendButton.addEventListener('click', sendCurrentMessage);

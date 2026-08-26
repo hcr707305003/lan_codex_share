@@ -1,4 +1,6 @@
 workspace = "../workspace"
+# 空数组共享全部未归档主 Session，并在网页中按项目分组。
+# 填入 ID 数组则只共享指定 Session；删除本配置项则使用单会话自动模式。
 session_ids = []
 permission_mode = "danger-full-access"
 host = "0.0.0.0"

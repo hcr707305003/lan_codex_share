@@ -105,3 +105,24 @@ def test_allows_explicit_preview_root_but_not_similar_prefix(tmp_path):
     with pytest.raises(WorkspaceFileError) as caught:
         viewer.open(str(denied))
     assert caught.value.status == 403
+
+
+def test_replaces_discovered_preview_roots_at_runtime(tmp_path):
+    workspace = tmp_path / "workspace"
+    project = tmp_path / "discovered"
+    workspace.mkdir()
+    project.mkdir()
+    document = project / "design.md"
+    document.write_text("# Discovered", encoding="utf-8")
+    viewer = WorkspaceFileViewer(workspace)
+
+    with pytest.raises(WorkspaceFileError):
+        viewer.open(str(document))
+
+    viewer.set_dynamic_roots([project])
+
+    assert viewer.open(str(document)).content == "# Discovered"
+
+    viewer.set_dynamic_roots([])
+    with pytest.raises(WorkspaceFileError):
+        viewer.open(str(document))

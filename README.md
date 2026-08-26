@@ -60,7 +60,7 @@ Windows 可以双击 `start_lan_codex_share.cmd`；macOS/Linux 在终端运行�
 ./start_lan_codex_share.sh
 ```
 
-启动窗口会显示类似 `http://192.168.1.20:8765/` 的分享地址和全部 Session ID。网页顶部可以切换 Session；选中的 ID 会写入地址栏，因此复制当前网址就能让同事直接打开同一会话。不同浏览器可以同时停留在不同 Session，互不抢占选择状态。其他设备无法连接时，请在当前系统防火墙中允许 Python/Codex 访问局域网；脚本不会自动修改防火墙。
+启动窗口会显示类似 `http://192.168.1.20:8765/` 的分享地址和 Session 数量。全部 Session 模式会在网页左侧按“项目 → Session”导航；固定列表模式仍可通过网页顶部切换。选中的 ID 会写入地址栏，因此复制当前网址就能让同事直接打开同一会话。不同浏览器可以同时停留在不同 Session，互不抢占选择状态。其他设备无法连接时，请在当前系统防火墙中允许 Python/Codex 访问局域网；脚本不会自动修改防火墙。
 
 源码环境也可以直接使用统一入口：
 
@@ -102,8 +102,9 @@ preview_roots = [
 
 相对路径以 `lan_config.toml` 所在目录为基准。`lan_config.toml` 是本机配置，已被 Git 忽略；仓库只提交不含个人路径的 `lan_config.example.toml`。
 
-- `session_ids = []`：单会话自动模式。复用 `runtime/lan/state.json` 保存的会话；没有记录时自动创建。
+- `session_ids = []`：获取本机全部未归档主 Session，排除子代理任务，并按“项目 → Session”分组。Session 首次打开时才建立连接；新任务会自动出现在目录中，无需重启服务。
 - `session_ids = ["Session A", "Session B"]`：固定共享这些会话。每个会话拥有独立历史投影、处理状态、模型设置和等待队列，并可同时执行任务；任一会话恢复失败时启动会直接报错，不会自动创建替代会话。
+- 完全删除 `session_ids` 和 `session_id` 配置项：单会话自动模式。复用 `runtime/lan/state.json` 保存的会话；没有记录时自动创建。
 - 旧版 `session_id = "..."` 仍可读取，便于升级，但不能与 `session_ids` 同时配置。
 - `permission_mode = "read-only"`：只读访问。
 - `permission_mode = "workspace-write"`：允许修改工作区。
@@ -111,4 +112,4 @@ preview_roots = [
 
 网页目前没有交互式审批弹窗，因此审批策略固定为 `never`；实际访问范围由 `permission_mode` 限制。本机 CLI 会连接所选 Session，并采用相同权限模式。
 
-局域网入口没有账号或密码。任何能访问地址的局域网设备都可以读取共享聊天记录、发送任务、上传图片、取消当前任务，并在配置的权限范围内操作本机文件。只应在可信局域网内使用，不要进行公网端口映射。
+局域网入口没有账号或密码。任何能访问地址的局域网设备都可以读取共享聊天记录、发送任务、上传图片、取消当前任务，并在配置的权限范围内操作本机文件。`session_ids = []` 还会把发现到的所有 Session 项目目录加入文件预览授权范围。只应在可信局域网内使用，不要进行公网端口映射。

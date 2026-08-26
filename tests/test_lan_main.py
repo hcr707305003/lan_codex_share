@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from lan_codex_share.lan_main import (
     SingleInstanceLock,
+    _build_session_hub,
     _lock_stream,
     _session_state_path,
     _share_urls,
@@ -107,3 +108,30 @@ def test_fixed_sessions_use_distinct_safe_state_files(tmp_path):
     assert first != second
     assert "/" not in first.name and ":" not in second.name
     assert _session_state_path(tmp_path, None) == tmp_path / "state.json"
+
+
+def test_explicit_empty_sessions_builds_catalog_hub(tmp_path):
+    image_store = SimpleNamespace(directory=tmp_path / "uploads")
+    image_store.directory.mkdir()
+
+    hub = _build_session_hub(
+        LanConfig(workspace=tmp_path, session_ids=()),
+        tmp_path / "runtime",
+        image_store,
+    )
+
+    assert hub.catalog_mode
+
+
+def test_unconfigured_sessions_keeps_single_auto_service(tmp_path):
+    image_store = SimpleNamespace(directory=tmp_path / "uploads")
+    image_store.directory.mkdir()
+
+    hub = _build_session_hub(
+        LanConfig(workspace=tmp_path),
+        tmp_path / "runtime",
+        image_store,
+    )
+
+    assert not hub.catalog_mode
+    assert len(hub._services) == 1

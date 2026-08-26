@@ -23,13 +23,21 @@ class LanConfig:
     max_images: int = 4
     log_level: str = "INFO"
     preview_roots: tuple[Path, ...] = ()
-    session_ids: tuple[str, ...] = ()
+    session_ids: tuple[str, ...] | None = None
     permission_mode: str = "danger-full-access"
 
     @property
     def session_id(self) -> str | None:
         """Return the first configured session for legacy single-session callers."""
         return self.session_ids[0] if self.session_ids else None
+
+    @property
+    def auto_session(self) -> bool:
+        return self.session_ids is None
+
+    @property
+    def discover_all_sessions(self) -> bool:
+        return self.session_ids == ()
 
 
 def load_lan_config(path: str | Path) -> LanConfig:
@@ -81,11 +89,14 @@ def load_lan_config(path: str | Path) -> LanConfig:
         if len(set(session_ids)) != len(session_ids):
             raise LanConfigError("session_ids 不能包含重复的 Session ID")
     else:
-        session_id_raw = data.get("session_id", "")
-        if not isinstance(session_id_raw, str):
-            raise LanConfigError("session_id 必须是字符串")
-        session_id = session_id_raw.strip()
-        session_ids = (session_id,) if session_id else ()
+        if "session_id" not in data:
+            session_ids = None
+        else:
+            session_id_raw = data["session_id"]
+            if not isinstance(session_id_raw, str):
+                raise LanConfigError("session_id 必须是字符串")
+            session_id = session_id_raw.strip()
+            session_ids = (session_id,) if session_id else None
     permission_mode_raw = data.get("permission_mode", "danger-full-access")
     if not isinstance(permission_mode_raw, str):
         raise LanConfigError("permission_mode 必须是字符串")

@@ -129,7 +129,23 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 
 .task-nav { min-height: 0; flex: 1; overflow: auto; padding-top: 8px; }
 .nav-label { padding: 8px 10px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.project-list { display: grid; gap: 5px; }
+.project-group { min-width: 0; }
+.project-group > summary { display: flex; min-height: 34px; align-items: center; gap: 7px; border-radius: 8px; padding: 0 8px; color: var(--text-soft); cursor: pointer; list-style: none; user-select: none; }
+.project-group > summary::-webkit-details-marker { display: none; }
+.project-group > summary:hover { background: color-mix(in srgb, var(--surface) 65%, transparent); }
+.project-group > summary svg { width: 14px; height: 14px; flex: 0 0 auto; transition: transform .16s ease; }
+.project-group[open] > summary svg { transform: rotate(180deg); }
+.project-heading { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
+.project-count { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
+.project-sessions { display: grid; gap: 2px; padding: 2px 0 5px 10px; }
 .task-entry { display: block; padding: 9px 10px; }
+.project-sessions .task-entry { position: relative; padding-left: 22px; }
+.project-sessions .task-entry::before { position: absolute; top: 15px; left: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); content: ""; }
+.project-sessions .task-entry[data-state="idle"]::before { background: var(--success); }
+.project-sessions .task-entry[data-state="processing"]::before { background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 12%, transparent); }
+.project-sessions .task-entry[data-state="error"]::before, .project-sessions .task-entry[data-state="disconnected"]::before { background: var(--danger); }
+.project-sessions .task-entry:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .task-entry.active { background: var(--surface); }
 .task-name, .task-id { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-name { color: var(--text); font-weight: 550; }
@@ -166,6 +182,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .sidebar-toggle { display: none; }
 
 .session-control { display: grid; min-width: 176px; gap: 1px; }
+.session-control[hidden] { display: none; }
 .session-control span { color: var(--muted); font-size: 9px; line-height: 1.1; }
 .session-control select { width: 100%; min-height: 27px; max-width: 250px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); padding: 0 28px 0 8px; color: var(--text-soft); font-size: 11px; text-overflow: ellipsis; }
 .session-control select:hover:not(:disabled), .session-control select:focus-visible { border-color: var(--border-strong); background: var(--surface); }
@@ -270,6 +287,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .scroll-to-bottom svg { width: 19px; height: 19px; }
 
 .initial-loading, .empty-state { display: grid; min-height: 42vh; place-content: center; justify-items: center; color: var(--muted); text-align: center; }
+.sidebar-empty { min-height: 120px; padding: 16px 10px; font-size: 12px; }
 .loading-ring { width: 22px; height: 22px; border: 2px solid var(--border-strong); border-top-color: var(--text); border-radius: 50%; animation: spin .8s linear infinite; }
 
 .turn { display: flow-root; min-width: 0; max-width: 100%; margin: 0 0 30px; }
@@ -523,6 +541,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; width: min(86vw, 290px); transform: translateX(-105%); box-shadow: 16px 0 48px rgba(0,0,0,.45); transition: transform .2s ease; }
   .sidebar.open { transform: translateX(0); }
   .sidebar-close, .sidebar-toggle { display: inline-grid; }
+  .project-group > summary { min-height: 44px; }
   .sidebar-close, .sidebar-toggle, .file-preview-header .icon-button { width: 44px; height: 44px; }
   .mobile-scrim { position: fixed; inset: 0; z-index: 35; background: rgba(0,0,0,.58); }
   .mobile-scrim:not([hidden]) { display: block; }

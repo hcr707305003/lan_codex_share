@@ -367,6 +367,50 @@ class CodexClient:
             if not cursor:
                 return models
 
+    def list_threads(self) -> list[dict[str, Any]]:
+        self.start()
+        assert self.rpc is not None
+        threads_by_id: dict[str, dict[str, Any]] = {}
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            params: dict[str, Any] = {
+                "archived": False,
+                "limit": 100,
+                "sortDirection": "desc",
+                "sortKey": "recency_at",
+            }
+            if cursor:
+                params["cursor"] = cursor
+            result = self.rpc.request("thread/list", params, timeout=60)
+            if not isinstance(result, dict) or not isinstance(result.get("data"), list):
+                raise CodexClientError("Codex thread/list 返回无效")
+            for raw in result["data"]:
+                if not isinstance(raw, dict):
+                    raise CodexClientError("Codex thread/list 返回无效 Session")
+                thread_id = str(raw.get("id") or "").strip()
+                if not thread_id:
+                    raise CodexClientError("Codex thread/list 返回缺少 Session ID")
+                if raw.get("ephemeral") is True or raw.get("parentThreadId"):
+                    continue
+                threads_by_id.setdefault(thread_id, dict(raw))
+            next_cursor = result.get("nextCursor")
+            if next_cursor is None or next_cursor == "":
+                break
+            if not isinstance(next_cursor, str) or next_cursor in seen_cursors:
+                raise CodexClientError("Codex thread/list 返回无效分页游标")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
+        def recency(thread: dict[str, Any]) -> int:
+            for key in ("recencyAt", "updatedAt", "createdAt"):
+                value = thread.get(key)
+                if isinstance(value, (int, float)):
+                    return int(value)
+            return 0
+
+        return sorted(threads_by_id.values(), key=recency, reverse=True)
+
     def update_thread_settings(
         self, model: str, reasoning_effort: str, service_tier: str | None
     ) -> dict[str, str | None]:

@@ -25,7 +25,9 @@ def test_load_lan_config_defaults(tmp_path):
     assert config.max_image_bytes == 10 * 1024 * 1024
     assert config.max_images == 4
     assert config.preview_roots == ()
-    assert config.session_ids == ()
+    assert config.session_ids is None
+    assert config.auto_session
+    assert not config.discover_all_sessions
     assert config.session_id is None
     assert config.permission_mode == "danger-full-access"
 
@@ -53,6 +55,18 @@ def test_loads_multiple_sessions(tmp_path):
 
     assert config.session_ids == ("session-a", "session-b")
     assert config.session_id == "session-a"
+
+
+def test_explicit_empty_session_ids_enables_discovery(tmp_path):
+    config_path = tmp_path / "lan_config.toml"
+    write_config(config_path, tmp_path, "session_ids = []\n")
+
+    config = load_lan_config(config_path)
+
+    assert config.session_ids == ()
+    assert config.discover_all_sessions
+    assert not config.auto_session
+    assert config.session_id is None
 
 
 def test_load_lan_config_preview_roots(tmp_path):

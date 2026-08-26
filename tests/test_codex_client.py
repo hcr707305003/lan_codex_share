@@ -125,6 +125,16 @@ def test_read_thread_and_public_notification_subscription(tmp_path):
         client.close()
 
 
+def test_list_threads_over_app_server_transport(tmp_path):
+    client = CodexClient(tmp_path, StateStore(tmp_path / "catalog.json"), command=fake_command())
+    try:
+        threads = client.list_threads()
+        assert [thread["id"] for thread in threads] == ["thread-fake"]
+        assert threads[0]["projectId"] == "project-fake"
+    finally:
+        client.close()
+
+
 def test_turn_client_id_and_additional_context(tmp_path):
     client = CodexClient(tmp_path, StateStore(tmp_path / "state.json"), turn_timeout_seconds=2, command=fake_command())
     try:
@@ -189,3 +199,63 @@ def test_strict_resume_never_replaces_fixed_session(tmp_path):
     with pytest.raises(CodexClientError, match="正被旧 Codex/VS Code 写入端占用"):
         client.ensure_thread()
     assert state.thread_id == "fixed-session"
+
+
+def test_list_threads_reads_all_pages_filters_and_deduplicates(tmp_path):
+    class PagedRpc:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, params, timeout=30):
+            self.calls.append((method, params, timeout))
+            assert method == "thread/list"
+            if "cursor" not in params:
+                return {
+                    "data": [
+                        {"id": "main-a", "cwd": str(tmp_path / "a"), "recencyAt": 20, "ephemeral": False},
+                        {"id": "child", "cwd": str(tmp_path / "a"), "parentThreadId": "main-a", "ephemeral": False},
+                        {"id": "temporary", "cwd": str(tmp_path), "recencyAt": 99, "ephemeral": True},
+                    ],
+                    "nextCursor": "page-2",
+                }
+            assert params["cursor"] == "page-2"
+            return {
+                "data": [
+                    {"id": "main-b", "cwd": str(tmp_path / "b"), "updatedAt": 30, "ephemeral": False},
+                    {"id": "main-a", "cwd": str(tmp_path / "old"), "recencyAt": 1, "ephemeral": False},
+                ],
+                "nextCursor": None,
+            }
+
+    rpc = PagedRpc()
+    client = CodexClient(tmp_path, StateStore(tmp_path / "catalog.json"))
+    client.start = lambda: None
+    client.rpc = rpc
+
+    threads = client.list_threads()
+
+    assert [thread["id"] for thread in threads] == ["main-b", "main-a"]
+    assert threads[1]["cwd"] == str(tmp_path / "a")
+    assert rpc.calls[0][1] == {
+        "archived": False,
+        "limit": 100,
+        "sortDirection": "desc",
+        "sortKey": "recency_at",
+    }
+
+
+@pytest.mark.parametrize(
+    "result",
+    [None, [], {"data": None}, {"data": [{"cwd": "missing-id"}]}, {"data": [], "nextCursor": 42}],
+)
+def test_list_threads_rejects_invalid_responses(tmp_path, result):
+    class InvalidRpc:
+        def request(self, method, params, timeout=30):
+            return result
+
+    client = CodexClient(tmp_path, StateStore(tmp_path / "catalog.json"))
+    client.start = lambda: None
+    client.rpc = InvalidRpc()
+
+    with pytest.raises(CodexClientError, match="thread/list"):
+        client.list_threads()

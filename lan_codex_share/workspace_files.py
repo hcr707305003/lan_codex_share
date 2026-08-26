@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import mimetypes
 import os
 from pathlib import Path
+import threading
 
 
 TEXT_EXTENSIONS = {
@@ -63,14 +64,25 @@ class WorkspaceFileViewer:
         max_inline_bytes: int = 25 * 1024 * 1024,
     ):
         self.root = Path(os.path.abspath(Path(root).expanduser())).resolve()
+        self._roots_lock = threading.RLock()
         roots = [self.root]
         for candidate in preview_roots:
             resolved = Path(os.path.abspath(Path(candidate).expanduser())).resolve()
             if resolved not in roots:
                 roots.append(resolved)
-        self.roots = tuple(roots)
+        self._base_roots = tuple(roots)
+        self.roots = self._base_roots
         self.max_text_bytes = max_text_bytes
         self.max_inline_bytes = max_inline_bytes
+
+    def set_dynamic_roots(self, candidates: list[str | Path] | tuple[Path, ...]) -> None:
+        resolved = [Path(os.path.abspath(Path(candidate).expanduser())).resolve() for candidate in candidates]
+        with self._roots_lock:
+            roots = list(self._base_roots)
+            for candidate in resolved:
+                if candidate.is_dir() and candidate not in roots:
+                    roots.append(candidate)
+            self.roots = tuple(roots)
 
     def open(self, raw_path: str) -> WorkspaceFilePreview:
         if not raw_path.strip():
@@ -82,7 +94,9 @@ class WorkspaceFileViewer:
             raise WorkspaceFileError(404, "文件不存在") from exc
         matched_root = None
         relative = None
-        for root in self.roots:
+        with self._roots_lock:
+            roots = self.roots
+        for root in roots:
             try:
                 relative = path.relative_to(root)
                 matched_root = root

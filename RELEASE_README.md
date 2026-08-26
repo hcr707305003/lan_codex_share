@@ -8,6 +8,8 @@
 2. 修改 `workspace`、`session_ids`、权限和端口。
 3. 启动共享服务：
 
+`session_ids = []` 会共享本机全部未归档主 Session，并按项目分组；填入 ID 数组时只共享指定 Session；删除该配置项时使用单会话自动模式。
+
 ```text
 lan_codex_share --config=lan_config.toml
 ```
