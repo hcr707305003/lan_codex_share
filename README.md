@@ -2,6 +2,8 @@
 
 在 Windows、macOS 或 Linux 本机托管一个或多个固定的 Codex Session，并通过浏览器分享给同一局域网内的同事。所有访问者可以切换共享会话，查看各自的聊天历史和实时任务进度，发送文字和 PNG/JPEG/WebP 图片，并在配置权限内操作本地工作区。
 
+仓库维护者发布新版本时，请按 [流水线构建与版本发布](PIPELINE_RELEASE.md) 操作；每个 Release 必须详细说明与功能相关的新增、修复、行为变化和升级提示。
+
 ## 前置条件
 
 - Python 3.11 或更高版本；Windows 通常使用 `python`，macOS/Linux 通常使用 `python3`。
