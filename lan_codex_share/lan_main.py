@@ -3,14 +3,15 @@ from __future__ import annotations
 import argparse
 from contextlib import AbstractContextManager
 import hashlib
+import importlib
 import logging
 from logging.handlers import RotatingFileHandler
+import os
 from pathlib import Path
 import shutil
 import socket
 import sys
 
-import msvcrt
 import psutil
 
 from .codex_client import CodexClient, CodexClientError
@@ -23,6 +24,28 @@ from .lan_web import LanWebApplication
 from .session_hub import LanSessionHub
 from .session_projection import SessionProjection
 from .state_store import StateStore
+
+
+def _lock_stream(stream, platform_name: str | None = None) -> None:
+    platform_name = platform_name or os.name
+    if platform_name == "nt":
+        lock_module = importlib.import_module("msvcrt")
+        stream.seek(0)
+        lock_module.locking(stream.fileno(), lock_module.LK_NBLCK, 1)
+        return
+    lock_module = importlib.import_module("fcntl")
+    lock_module.flock(stream.fileno(), lock_module.LOCK_EX | lock_module.LOCK_NB)
+
+
+def _unlock_stream(stream, platform_name: str | None = None) -> None:
+    platform_name = platform_name or os.name
+    if platform_name == "nt":
+        lock_module = importlib.import_module("msvcrt")
+        stream.seek(0)
+        lock_module.locking(stream.fileno(), lock_module.LK_UNLCK, 1)
+        return
+    lock_module = importlib.import_module("fcntl")
+    lock_module.flock(stream.fileno(), lock_module.LOCK_UN)
 
 
 class SingleInstanceLock(AbstractContextManager):
@@ -38,7 +61,7 @@ class SingleInstanceLock(AbstractContextManager):
             self._stream.flush()
         self._stream.seek(0)
         try:
-            msvcrt.locking(self._stream.fileno(), msvcrt.LK_NBLCK, 1)
+            _lock_stream(self._stream)
         except OSError as exc:
             self._stream.close()
             self._stream = None
@@ -47,9 +70,8 @@ class SingleInstanceLock(AbstractContextManager):
 
     def __exit__(self, exc_type, exc, traceback):
         if self._stream:
-            self._stream.seek(0)
             try:
-                msvcrt.locking(self._stream.fileno(), msvcrt.LK_UNLCK, 1)
+                _unlock_stream(self._stream)
             finally:
                 self._stream.close()
                 self._stream = None
@@ -164,7 +186,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Session 数量：{len(hub.thread_ids)}")
                 for index, thread_id in enumerate(hub.thread_ids, start=1):
                     print(f"Session {index}：{thread_id}")
-                print(f"本机 CLI：双击 open_lan_codex_cli.cmd（连接 127.0.0.1:{config.app_server_port}）")
+                print(
+                    "本机 CLI：Windows 运行 open_lan_codex_cli.cmd，"
+                    f"macOS/Linux 运行 ./open_lan_codex_cli.sh（连接 127.0.0.1:{config.app_server_port}）"
+                )
                 print(f"工作目录：{config.workspace}")
                 print(f"权限：{config.permission_mode} / approval never")
                 if config.permission_mode == "danger-full-access":
@@ -173,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
                     print("警告：局域网内无需登录，任何访问者都可以修改工作区文件。")
                 else:
                     print("提示：局域网内无需登录，任何访问者都可以读取授权范围内的文件。")
-                print("若其他设备无法连接，请手动允许 Python 访问 Windows 专用网络。")
+                print("若其他设备无法连接，请检查操作系统防火墙，并允许 Python/Codex 访问局域网。")
                 print("按 Ctrl+C 停止服务。")
                 print("=" * 72)
                 logging.info("LAN Shared Codex Session listening on %s:%s", config.host, actual_port)
