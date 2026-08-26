@@ -239,6 +239,14 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/cancel":
                 self._json(HTTPStatus.OK, {"cancelled": self.app.service.cancel(session_id, source_ip)})
                 return
+            if path == "/api/session/release":
+                released = self.app.service.release_session(session_id, source_ip)
+                self._json(HTTPStatus.OK, {"released": released})
+                return
+            if path == "/api/session/reconnect":
+                reconnected = self.app.service.reconnect_session(session_id, source_ip)
+                self._json(HTTPStatus.OK, {"reconnected": reconnected})
+                return
             if path == "/api/resync":
                 self._json(HTTPStatus.OK, {"resynced": self.app.service.resync(session_id, source_ip)})
                 return

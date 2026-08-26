@@ -16,6 +16,8 @@ class FakeService:
         self.cleared_queued = []
         self.resynced = []
         self.model_updates = []
+        self.released_sessions = []
+        self.reconnected_sessions = []
         self.subscribers = set()
 
     def resolve_session_id(self, session_id=None):
@@ -70,6 +72,14 @@ class FakeService:
 
     def resync(self, session_id, source_ip):
         self.resynced.append((session_id, source_ip))
+        return True
+
+    def release_session(self, session_id, source_ip):
+        self.released_sessions.append((session_id, source_ip))
+        return True
+
+    def reconnect_session(self, session_id, source_ip):
+        self.reconnected_sessions.append((session_id, source_ip))
         return True
 
     def update_model_settings(self, session_id, model, reasoning_effort, service_tier, source_ip):
@@ -145,6 +155,8 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b'id="queue-panel"' in page
         assert b'id="queue-count"' in page
         assert b'id="queue-list"' in page
+        assert b'id="release-session"' in page
+        assert b'id="reconnect-session"' in page
         assert b'id="processing-banner"' in page
         assert b'id="model-toggle"' in page
         assert b'id="project-list"' in page
@@ -184,6 +196,9 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b"parseLocalFileTarget" in script
         assert b"/api/queue/cancel" in script
         assert b"/api/queue/clear" in script
+        assert b"/api/session/release" in script
+        assert b"/api/session/reconnect" in script
+        assert b"changeSessionConnection" in script
         assert b"renderQueue(pending)" in script
         assert b"fragment.append(renderUserMessage(pending, true))" not in script
         assert b"processingBanner.hidden = !processing" in script
@@ -251,6 +266,8 @@ def test_security_and_control_routes(tmp_path):
         assert json.loads(cleared) == {"cleared": 2}
         assert request(server, "POST", "/api/queue/cancel", b"{}", headers)[0] == 400
         assert request(server, "POST", "/api/resync", b"{}", headers)[0] == 200
+        assert json.loads(request(server, "POST", "/api/session/release", b"{}", headers)[2]) == {"released": True}
+        assert json.loads(request(server, "POST", "/api/session/reconnect", b"{}", headers)[2]) == {"reconnected": True}
         status, _, updated = request(
             server,
             "POST",
@@ -277,6 +294,8 @@ def test_security_and_control_routes(tmp_path):
         assert service.cancelled_queued == [("thread-web", "queued-1", "127.0.0.1")]
         assert service.cleared_queued == [("thread-web", "127.0.0.1")]
         assert service.resynced == [("thread-web", "127.0.0.1")]
+        assert service.released_sessions == [("thread-web", "127.0.0.1")]
+        assert service.reconnected_sessions == [("thread-web", "127.0.0.1")]
         assert service.model_updates == [
             ("thread-web", "gpt-5.6-sol", "high", "fast", "127.0.0.1"),
             ("thread-web", "gpt-5.6-sol", "high", None, "127.0.0.1"),

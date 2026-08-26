@@ -322,6 +322,12 @@ class LanSessionHub:
     def cancel(self, session_id: Any, source_ip: str) -> bool:
         return self._service(session_id)[1].cancel(source_ip)
 
+    def release_session(self, session_id: Any, source_ip: str) -> bool:
+        return self._service(session_id)[1].release_session(source_ip)
+
+    def reconnect_session(self, session_id: Any, source_ip: str) -> bool:
+        return self._service(session_id)[1].reconnect_session(source_ip)
+
     def resync(self, session_id: Any, source_ip: str) -> bool:
         return self._service(session_id)[1].resync(source_ip)
 

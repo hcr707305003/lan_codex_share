@@ -139,14 +139,23 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .project-heading { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
 .project-count { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
 .project-sessions { display: grid; gap: 2px; padding: 2px 0 5px 10px; }
+.task-entry-row { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 36px; align-items: center; gap: 2px; }
 .task-entry { display: block; padding: 9px 10px; }
+.task-entry-row .task-entry { width: 100%; min-width: 0; }
 .project-sessions .task-entry { position: relative; padding-left: 22px; }
 .project-sessions .task-entry::before { position: absolute; top: 15px; left: 9px; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); content: ""; }
 .project-sessions .task-entry[data-state="idle"]::before { background: var(--success); }
 .project-sessions .task-entry[data-state="processing"]::before { background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 12%, transparent); }
 .project-sessions .task-entry[data-state="error"]::before, .project-sessions .task-entry[data-state="disconnected"]::before { background: var(--danger); }
+.project-sessions .task-entry[data-state="released"]::before { background: var(--info); }
 .project-sessions .task-entry:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); }
 .task-entry.active { background: var(--surface); }
+.session-connection-action { display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
+.session-connection-action:hover:not(:disabled), .session-connection-action:focus-visible { background: var(--surface); color: var(--text); }
+.session-connection-action[data-action="release"]:hover:not(:disabled) { color: var(--warning); }
+.session-connection-action[data-action="reconnect"] { color: var(--info); }
+.session-connection-action:disabled { cursor: default; opacity: .28; }
+.session-connection-action svg { width: 15px; height: 15px; }
 .task-name, .task-id { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-name { color: var(--text); font-weight: 550; }
 .task-id { margin-top: 2px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
@@ -226,6 +235,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .connection-pill.processing { border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); background: color-mix(in srgb, var(--warning) 13%, var(--surface)); color: #f3d898; box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 8%, transparent); font-weight: 650; }
 .connection-pill.processing .status-dot { background: var(--warning); animation: pulse 1.3s ease-in-out infinite; }
 .connection-pill.disconnected .status-dot { background: var(--danger); }
+.connection-pill.released { border-color: color-mix(in srgb, var(--info) 45%, var(--border)); color: var(--info); }
+.connection-pill.released .status-dot { background: var(--info); }
 
 .menu-wrap { position: relative; }
 .task-menu {
@@ -242,8 +253,10 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .task-menu[hidden] { display: none; }
 .task-menu button { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 10px; border: 0; border-radius: 7px; background: transparent; padding: 0 10px; text-align: left; }
+.task-menu button[hidden] { display: none; }
 .task-menu button:hover { background: var(--surface-strong); }
 .task-menu button.danger { color: var(--danger); }
+.task-menu button.warning { color: var(--warning); }
 
 .timeline-shell {
   position: relative;
@@ -423,7 +436,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .composer:focus-within { border-color: #626262; box-shadow: 0 12px 38px rgba(0,0,0,.24); }
 .composer.drag-over { border-color: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 14%, transparent); }
+.composer.session-released { border-style: dashed; box-shadow: none; }
 .composer textarea { display: block; width: 100%; min-height: 58px; max-height: 210px; resize: none; overflow-y: auto; border: 0; outline: 0; background: transparent; padding: 13px 14px 4px; color: var(--text); line-height: 1.5; }
+.composer textarea:disabled { cursor: not-allowed; color: var(--muted); }
 .composer textarea::placeholder { color: #777; }
 .composer-toolbar { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 7px 7px; }
 .composer-left { display: flex; min-width: 0; align-items: center; gap: 7px; }
@@ -558,6 +573,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   .sidebar.open { transform: translateX(0); }
   .sidebar-close, .sidebar-toggle { display: inline-grid; }
   .project-group > summary { min-height: 44px; }
+  .task-entry-row { grid-template-columns: minmax(0, 1fr) 44px; }
+  .session-connection-action { width: 44px; height: 44px; }
   .sidebar-close, .sidebar-toggle, .file-preview-header .icon-button { width: 44px; height: 44px; }
   .mobile-scrim { position: fixed; inset: 0; z-index: 35; background: rgba(0,0,0,.58); }
   .mobile-scrim:not([hidden]) { display: block; }

@@ -12,6 +12,8 @@ class FakeSessionService:
         self.handlers = []
         self.calls = []
         self.closed = False
+        self.released = []
+        self.reconnected = []
 
     def add_change_handler(self, handler):
         self.handlers.append(handler)
@@ -35,6 +37,14 @@ class FakeSessionService:
     def submit(self, text, images, source_ip):
         self.calls.append((text, images, source_ip))
         return f"message-{self.thread_id}"
+
+    def release_session(self, source_ip):
+        self.released.append(source_ip)
+        return True
+
+    def reconnect_session(self, source_ip):
+        self.reconnected.append(source_ip)
+        return True
 
     def close(self):
         self.closed = True
@@ -73,6 +83,21 @@ def test_hub_fans_out_session_updates():
         raise AssertionError("hub did not broadcast the session update") from exc
     finally:
         hub.unsubscribe(subscriber)
+        hub.close()
+
+
+def test_hub_routes_release_and_reconnect_to_target_session():
+    first = FakeSessionService("session-a", "Alpha")
+    second = FakeSessionService("session-b", "Beta")
+    hub = LanSessionHub([first, second])
+    hub.start()
+    try:
+        assert hub.release_session("session-b", "192.168.1.4")
+        assert hub.reconnect_session("session-b", "192.168.1.4")
+        assert first.released == []
+        assert second.released == ["192.168.1.4"]
+        assert second.reconnected == ["192.168.1.4"]
+    finally:
         hub.close()
 
 

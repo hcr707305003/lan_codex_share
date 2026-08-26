@@ -40,6 +40,7 @@ class LanChatService:
         self._last_broadcast_at = 0.0
         self._last_error: str | None = None
         self._last_notice: str | None = None
+        self._released = False
         self.projection.add_change_handler(self._projection_changed)
         if hasattr(self.codex, "add_notification_handler"):
             self.codex.add_notification_handler(self.projection.apply_notification)
@@ -119,6 +120,8 @@ class LanChatService:
         }
 
     def _status(self, connection: str) -> str:
+        if connection == "released":
+            return "released"
         if connection != "connected":
             return "reconnecting"
         if self._active.is_set() or bool(getattr(self.codex, "thread_busy", False)):
@@ -224,6 +227,8 @@ class LanChatService:
         selected_effort = reasoning_effort.strip()
         selected_tier = service_tier.strip() if isinstance(service_tier, str) and service_tier.strip() else None
         with self._queued_lock:
+            if self._released:
+                raise ValueError("Session 已释放，请先重新连接")
             if self._active.is_set() or bool(getattr(self.codex, "thread_busy", False)) or self._queued_tasks:
                 raise ValueError("任务与队列完成后才可调整模型")
             with self._model_lock:
@@ -256,9 +261,11 @@ class LanChatService:
         cleaned = text.strip()
         if not cleaned and not images:
             raise ValueError("消息文字和图片不能同时为空")
-        pending = self.projection.add_pending(cleaned, images, source_ip)
-        task = {"message": pending, "images": images}
         with self._queued_lock:
+            if self._released:
+                raise ValueError("Session 已释放，请先重新连接")
+            pending = self.projection.add_pending(cleaned, images, source_ip)
+            task = {"message": pending, "images": images}
             self._queued_tasks[str(pending["id"])] = task
             self._queue.put(task)
         self._last_error = None
@@ -303,20 +310,71 @@ class LanChatService:
                     self.logger.warning("Cannot delete cancelled queue image: %s", type(exc).__name__)
 
     def cancel(self, source_ip: str) -> bool:
-        cancelled = bool(self.codex.interrupt_turn())
+        with self._queued_lock:
+            if self._released:
+                raise ValueError("Session 已释放，请先重新连接")
+            cancelled = bool(self.codex.interrupt_turn())
         self._last_notice = f"{source_ip} 已请求取消当前任务。" if cancelled else "当前没有活动任务。"
         self._broadcast()
         return cancelled
 
     def resync(self, source_ip: str) -> bool:
-        if self._active.is_set() or bool(getattr(self.codex, "thread_busy", False)):
-            self._last_notice = "任务执行中，完成后再重新同步。"
-            self._broadcast()
-            return False
-        thread = self.codex.read_thread(include_turns=True)
-        self.thread_id = str(thread["id"])
-        self.projection.replace_thread(thread)
+        with self._queued_lock:
+            if self._released:
+                raise ValueError("Session 已释放，请先重新连接")
+            if self._active.is_set() or bool(getattr(self.codex, "thread_busy", False)):
+                self._last_notice = "任务执行中，完成后再重新同步。"
+                self._broadcast()
+                return False
+            thread = self.codex.read_thread(include_turns=True)
+            self.thread_id = str(thread["id"])
+            self.projection.replace_thread(thread)
         self._last_notice = f"{source_ip} 已从真实 Session 重新同步。"
+        self._last_error = None
+        self._broadcast()
+        return True
+
+    def release_session(self, source_ip: str) -> bool:
+        with self._queued_lock:
+            if self._released:
+                return False
+            if self._active.is_set() or bool(getattr(self.codex, "thread_busy", False)) or self._queued_tasks:
+                raise ValueError("任务与队列结束后才可释放 Session")
+            self.codex.close()
+            self._released = True
+            self.projection.set_connection("released")
+        self._last_notice = f"{source_ip} 已释放当前 Session，可在本机 Codex 客户端中打开。"
+        self._last_error = None
+        self._broadcast()
+        return True
+
+    def reconnect_session(self, source_ip: str) -> bool:
+        with self._queued_lock:
+            if not self._released:
+                return False
+            self.projection.set_connection("connecting")
+            try:
+                thread = self.codex.read_thread(include_turns=True)
+            except Exception as exc:
+                self.codex.close()
+                self.projection.set_connection("released")
+                self._last_error = f"重新连接 Session 失败：{exc}"
+                self._last_notice = None
+                self._broadcast()
+                raise ValueError(self._last_error) from exc
+            self.thread_id = str(thread["id"])
+            self.projection.replace_thread(thread)
+            settings = getattr(self.codex, "model_settings", None)
+            if isinstance(settings, dict):
+                with self._model_lock:
+                    self._model_settings = {
+                        "model": settings.get("model"),
+                        "reasoning_effort": settings.get("reasoning_effort"),
+                        "service_tier": settings.get("service_tier"),
+                    }
+            self._released = False
+            self.projection.set_connection("connected")
+        self._last_notice = f"{source_ip} 已重新连接当前 Session。"
         self._last_error = None
         self._broadcast()
         return True
@@ -342,10 +400,11 @@ class LanChatService:
             message_id = str(message["id"])
             with self._queued_lock:
                 claimed = self._queued_tasks.pop(message_id, None)
+                if claimed is task:
+                    self._active.set()
             if claimed is not task:
                 self._queue.task_done()
                 continue
-            self._active.set()
             self.projection.update_pending(message_id, "processing")
             self._broadcast()
             try:

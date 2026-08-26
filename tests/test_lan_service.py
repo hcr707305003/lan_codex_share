@@ -22,6 +22,8 @@ class FakeCodex:
         self.state_handlers = []
         self.notification_handlers = []
         self.settings_updates = []
+        self.closed = 0
+        self.read_failure = None
         self.model_settings = {
             "model": "gpt-5.6-sol", "reasoning_effort": "high", "service_tier": None,
         }
@@ -30,6 +32,8 @@ class FakeCodex:
         return self.thread_id
 
     def read_thread(self, include_turns=True):
+        if self.read_failure:
+            raise self.read_failure
         return {
             "id": self.thread_id,
             "name": "LAN Shared",
@@ -84,7 +88,7 @@ class FakeCodex:
         return self.active > 0
 
     def close(self):
-        pass
+        self.closed += 1
 
     def wait_for_thread_idle(self, timeout=None):
         if not self.thread_busy:
@@ -184,6 +188,61 @@ def test_start_reads_real_thread_and_cancel_reports_state(tmp_path):
         assert snapshot["thread"]["turns"][0]["items"][0]["text"] == "history"
         assert not service.cancel("192.168.1.4")
         assert service.snapshot()["last_notice"] == "当前没有活动任务。"
+    finally:
+        service.close()
+
+
+def test_idle_session_can_be_released_and_explicitly_reconnected(tmp_path):
+    service, codex = make_service(tmp_path)
+    try:
+        assert service.release_session("192.168.1.4")
+        released = service.snapshot()
+        assert released["connection"] == "released"
+        assert released["status"] == "released"
+        assert codex.closed == 1
+        assert not service.release_session("192.168.1.4")
+        with pytest.raises(ValueError, match="已释放"):
+            service.submit("blocked", [], "192.168.1.4")
+        with pytest.raises(ValueError, match="已释放"):
+            service.resync("192.168.1.4")
+
+        assert service.reconnect_session("192.168.1.4")
+        reconnected = service.snapshot()
+        assert reconnected["connection"] == "connected"
+        assert reconnected["status"] == "idle"
+        assert not service.reconnect_session("192.168.1.4")
+    finally:
+        service.close()
+
+
+def test_session_release_rejects_active_or_queued_work(tmp_path):
+    codex = FakeCodex()
+    codex.thread_busy = True
+    service, _ = make_service(tmp_path, codex)
+    try:
+        service.submit("queued", [], "192.168.1.4")
+        wait_until(lambda: service.snapshot()["queue_size"] == 1)
+        with pytest.raises(ValueError, match="任务与队列结束后"):
+            service.release_session("192.168.1.4")
+        assert service.snapshot()["connection"] == "connected"
+    finally:
+        codex.thread_busy = False
+        service.close()
+
+
+def test_failed_reconnect_keeps_session_released(tmp_path):
+    service, codex = make_service(tmp_path)
+    try:
+        assert service.release_session("192.168.1.4")
+        codex.read_failure = CodexClientError("active writer")
+
+        with pytest.raises(ValueError, match="active writer"):
+            service.reconnect_session("192.168.1.4")
+
+        snapshot = service.snapshot()
+        assert snapshot["connection"] == "released"
+        assert "active writer" in snapshot["last_error"]
+        assert codex.closed == 2
     finally:
         service.close()
 

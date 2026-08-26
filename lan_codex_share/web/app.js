@@ -37,6 +37,10 @@ const workspaceName = document.getElementById('workspace-name');
 const menuToggle = document.getElementById('menu-toggle');
 const taskMenu = document.getElementById('task-menu');
 const clearQueueButton = document.getElementById('clear-queue');
+const releaseSessionButton = document.getElementById('release-session');
+const reconnectSessionButton = document.getElementById('reconnect-session');
+const resyncButton = document.getElementById('resync');
+const cancelButton = document.getElementById('cancel');
 const sidebar = document.getElementById('sidebar');
 const mobileScrim = document.getElementById('mobile-scrim');
 const appShell = document.querySelector('.app-shell');
@@ -142,6 +146,7 @@ function stateLabel(status) {
   return ({
     queued: '排队中', processing: '处理中', streaming: '生成中', inProgress: '处理中',
     completed: '已完成', failed: '失败', interrupted: '已中断', cancelled: '已取消', idle: '空闲',
+    released: '已释放',
   })[value] || value || '等待中';
 }
 
@@ -164,6 +169,7 @@ function shortId(value) {
 
 function sessionStatusLabel(session) {
   if (session.connection === 'error') return '加载失败';
+  if (session.connection === 'released') return '已释放';
   if (session.status === 'processing') return '处理中';
   const queued = Number(session.queue_size || 0);
   if (queued) return `排队 ${queued}`;
@@ -174,6 +180,7 @@ function sessionStatusLabel(session) {
 
 function sessionNavigationState(session) {
   if (session.connection === 'error') return 'error';
+  if (session.connection === 'released') return 'released';
   if (session.status === 'processing') return 'processing';
   if (session.connection === 'not_loaded') return 'not-loaded';
   if (session.connection !== 'connected') return 'disconnected';
@@ -209,6 +216,7 @@ function renderProjectNavigation(snapshot, selected) {
     for (const session of sessions) {
       const id = String(session.thread_id || '');
       if (!id) continue;
+      const row = el('div', 'task-entry-row');
       const button = el('button', `task-entry${id === selected ? ' active' : ''}`);
       button.type = 'button';
       button.dataset.sessionId = id;
@@ -223,7 +231,27 @@ function renderProjectNavigation(snapshot, selected) {
         selectSession(id);
         closeSidebar();
       });
-      sessionNodes.append(button);
+      row.append(button);
+      const connection = String(session.connection || '');
+      if (connection === 'connected' || connection === 'released') {
+        const reconnect = connection === 'released';
+        const action = el('button', 'session-connection-action');
+        action.type = 'button';
+        action.dataset.action = reconnect ? 'reconnect' : 'release';
+        const blocked = !reconnect && (session.status === 'processing' || Number(session.queue_size || 0) > 0);
+        action.disabled = blocked;
+        action.title = blocked
+          ? '任务与队列结束后才可释放 Session'
+          : reconnect ? '重新连接 Session' : '释放 Session';
+        action.setAttribute('aria-label', `${action.title}：${name}`);
+        action.append(icon(reconnect ? 'link' : 'unlink'));
+        action.addEventListener('click', event => {
+          event.stopPropagation();
+          changeSessionConnection(id, reconnect, action);
+        });
+        row.append(action);
+      }
+      sessionNodes.append(row);
     }
     details.append(sessionNodes);
     details.addEventListener('toggle', () => {
@@ -803,6 +831,7 @@ function render(snapshot) {
   const thread = snapshot.thread || {};
   const connection = snapshot.connection || 'disconnected';
   const processing = snapshot.status === 'processing';
+  const released = connection === 'released';
   const name = thread.name || thread.preview || '局域网共享 Codex 会话';
   const threadId = snapshot.thread_id || thread.id || '';
   threadTitle.textContent = name;
@@ -811,12 +840,22 @@ function render(snapshot) {
   workspacePath.textContent = thread.cwd || '真实 Codex Session';
   if (thread.cwd) workspaceName.textContent = String(thread.cwd).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '工作区';
   connectionPill.className = `connection-pill ${processing ? 'processing' : connection}`;
-  connectionLabel.textContent = connection !== 'connected' ? '连接断开' : processing ? 'Codex 处理中' : '已连接';
+  connectionLabel.textContent = released ? '已释放' : connection !== 'connected' ? '连接断开' : processing ? 'Codex 处理中' : '已连接';
   processingBanner.hidden = !processing;
   document.title = processing ? `处理中 · ${name}` : name;
   const queueSize = Number(snapshot.queue_size || 0);
   queueNode.textContent = `队列 ${queueSize}`;
   clearQueueButton.disabled = queueSize === 0;
+  releaseSessionButton.hidden = released;
+  releaseSessionButton.disabled = connection !== 'connected' || processing || queueSize > 0;
+  reconnectSessionButton.hidden = !released;
+  reconnectSessionButton.disabled = !released;
+  resyncButton.disabled = released || processing;
+  cancelButton.disabled = released;
+  input.disabled = released;
+  imageInput.disabled = released;
+  input.placeholder = released ? 'Session 已释放，重新连接后可发送消息' : '给 Codex 发送消息';
+  composer.classList.toggle('session-released', released);
   renderModelControls(snapshot, processing, queueSize);
   updateSendState();
   if (snapshot.last_error) setNotice(snapshot.last_error, true);
@@ -931,15 +970,38 @@ async function refresh() {
 }
 
 async function mutate(path, payload = {}) {
+  return mutateForSession(path, selectedSessionId || null, payload);
+}
+
+async function mutateForSession(path, sessionId, payload = {}) {
   const response = await fetch(path, {
     method: 'POST',
     headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
-    body: JSON.stringify({...payload, session_id: selectedSessionId || null}),
+    body: JSON.stringify({...payload, session_id: sessionId}),
   });
   let result = {};
   try { result = await response.json(); } catch (_) { /* use generic error */ }
   if (!response.ok) throw new Error(result.error || '请求失败');
   return result;
+}
+
+async function changeSessionConnection(sessionId, reconnect, button) {
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  try {
+    const path = reconnect ? '/api/session/reconnect' : '/api/session/release';
+    const result = await mutateForSession(path, sessionId);
+    const changed = reconnect ? result.reconnected : result.released;
+    setNotice(changed
+      ? reconnect ? 'Session 已重新连接。' : 'Session 已释放，可在本机 Codex 客户端中打开。'
+      : reconnect ? 'Session 已经处于连接状态。' : 'Session 已经释放。');
+    await refresh();
+  } catch (error) {
+    setNotice(error.message, true);
+  } finally {
+    button.removeAttribute('aria-busy');
+    if (button.isConnected) button.disabled = false;
+  }
 }
 
 function fileToPayload(file) {
@@ -1155,13 +1217,23 @@ document.getElementById('copy-session').addEventListener('click', async () => {
   catch (_) { setNotice(`Session ID：${id}`); }
 });
 
-document.getElementById('resync').addEventListener('click', async () => {
+resyncButton.addEventListener('click', async () => {
   closeMenu(); setNotice('正在从真实 Session 重新同步…');
   try {
     const result = await mutate('/api/resync');
     setNotice(result.resynced ? '已从真实 Session 重新同步。' : '任务执行中，稍后再同步。');
     await refresh();
   } catch (error) { setNotice(error.message, true); }
+});
+
+releaseSessionButton.addEventListener('click', () => {
+  closeMenu();
+  changeSessionConnection(selectedSessionId, false, releaseSessionButton);
+});
+
+reconnectSessionButton.addEventListener('click', () => {
+  closeMenu();
+  changeSessionConnection(selectedSessionId, true, reconnectSessionButton);
 });
 
 clearQueueButton.addEventListener('click', async () => {
@@ -1182,7 +1254,7 @@ clearQueueButton.addEventListener('click', async () => {
   }
 });
 
-document.getElementById('cancel').addEventListener('click', async () => {
+cancelButton.addEventListener('click', async () => {
   closeMenu();
   try {
     const result = await mutate('/api/cancel');
