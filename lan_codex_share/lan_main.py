@@ -113,17 +113,14 @@ def _session_state_path(runtime: Path, session_id: str | None) -> Path:
     return runtime / "sessions" / f"{digest}.json"
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="局域网共享 Codex 会话")
-    parser.add_argument("--config", default="lan_config.toml")
-    args = parser.parse_args(argv)
-    base = Path.cwd()
-    runtime = base / "runtime" / "lan"
+def run(config_path: str | Path) -> int:
+    config_path = Path(config_path).expanduser().resolve()
+    runtime = config_path.parent / "runtime" / "lan"
     try:
-        config = load_lan_config(base / args.config)
+        config = load_lan_config(config_path)
     except LanConfigError as exc:
         print(f"配置错误：{exc}", file=sys.stderr)
-        print("请复制 lan_config.example.toml 为 lan_config.toml 并检查工作区。", file=sys.stderr)
+        print(f"请将 lan_config.example.toml 复制为：{config_path}", file=sys.stderr)
         return 2
 
     _configure_logging(runtime, config.log_level)
@@ -186,10 +183,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Session 数量：{len(hub.thread_ids)}")
                 for index, thread_id in enumerate(hub.thread_ids, start=1):
                     print(f"Session {index}：{thread_id}")
-                print(
-                    "本机 CLI：Windows 运行 open_lan_codex_cli.cmd，"
-                    f"macOS/Linux 运行 ./open_lan_codex_cli.sh（连接 127.0.0.1:{config.app_server_port}）"
-                )
+                if getattr(sys, "frozen", False):
+                    cli_command = f'"{sys.executable}" cli --config="{config_path}"'
+                else:
+                    cli_command = f'python -m lan_codex_share cli --config="{config_path}"'
+                print(f"本机 CLI：{cli_command}（连接 127.0.0.1:{config.app_server_port}）")
                 print(f"工作目录：{config.workspace}")
                 print(f"权限：{config.permission_mode} / approval never")
                 if config.permission_mode == "danger-full-access":
@@ -218,6 +216,16 @@ def main(argv: list[str] | None = None) -> int:
         logging.error("%s", exc)
         return 5
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="局域网共享 Codex 会话")
+    parser.add_argument("--config", default="lan_config.toml")
+    args = parser.parse_args(argv)
+    config_path = Path(args.config).expanduser()
+    if not config_path.is_absolute():
+        config_path = Path.cwd() / config_path
+    return run(config_path)
 
 
 if __name__ == "__main__":

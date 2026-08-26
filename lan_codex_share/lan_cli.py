@@ -35,17 +35,13 @@ def build_cli_command(config: LanConfig, thread_id: str | None) -> list[str]:
     ]
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="打开局域网共享 Codex session 的本机 CLI")
-    parser.add_argument("--config", default="lan_config.toml")
-    parser.add_argument("--session", help="要打开的 Session ID；多会话配置未指定时使用第一项")
-    args = parser.parse_args(argv)
-    base = Path.cwd()
+def run(config_path: str | Path, session: str | None = None) -> int:
+    config_path = Path(config_path).expanduser().resolve()
     try:
-        config = load_lan_config(base / args.config)
-        state_path = base / "runtime" / "lan" / "state.json"
+        config = load_lan_config(config_path)
+        state_path = config_path.parent / "runtime" / "lan" / "state.json"
         state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
-        selected = args.session.strip() if isinstance(args.session, str) else None
+        selected = session.strip() if isinstance(session, str) else None
         if selected and config.session_ids and selected not in config.session_ids:
             raise ValueError("--session 不在 session_ids 共享列表中")
         command = build_cli_command(config, selected or config.session_id or state.get("thread_id"))
@@ -53,6 +49,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"无法打开共享 CLI：{exc}", file=sys.stderr)
         return 2
     return subprocess.call(command, cwd=str(config.workspace))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="打开局域网共享 Codex session 的本机 CLI")
+    parser.add_argument("--config", default="lan_config.toml")
+    parser.add_argument("--session", help="要打开的 Session ID；多会话配置未指定时使用第一项")
+    args = parser.parse_args(argv)
+    config_path = Path(args.config).expanduser()
+    if not config_path.is_absolute():
+        config_path = Path.cwd() / config_path
+    return run(config_path, args.session)
 
 
 if __name__ == "__main__":

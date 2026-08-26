@@ -7,6 +7,26 @@
 - Python 3.11 或更高版本；Windows 通常使用 `python`，macOS/Linux 通常使用 `python3`。
 - Codex CLI 已安装并登录，`codex --version` 可用。
 
+从 GitHub Release 下载原生版本包时不需要安装 Python，但仍需安装并登录 Codex CLI。
+
+## 原生版本包
+
+Release 提供 Windows x64、Linux x64、Linux ARM64、macOS Intel 和 macOS Apple Silicon 五个平台的 ZIP。解压后将 `lan_config.example.toml` 复制为 `lan_config.toml`，然后直接运行：
+
+```text
+lan_codex_share --config=lan_config.toml
+```
+
+Windows 程序名为 `lan_codex_share.exe`。未指定 `--config` 时，程序只读取可执行文件同目录的 `lan_config.toml`；显式相对路径按当前终端目录解析。一个程序同时支持 Share 和本机 CLI：
+
+```text
+lan_codex_share
+lan_codex_share cli --config=lan_config.toml
+lan_codex_share cli --config=lan_config.toml --session <Session ID>
+```
+
+版本包未进行 Windows 代码签名或 macOS 公证，首次运行可能出现未知发布者提示。Release 同时提供 `SHA256SUMS.txt`，建议在运行前核对 ZIP 的 SHA-256。
+
 ## 首次安装
 
 Windows PowerShell：
@@ -41,6 +61,13 @@ Windows 可以双击 `start_lan_codex_share.cmd`；macOS/Linux 在终端运行�
 ```
 
 启动窗口会显示类似 `http://192.168.1.20:8765/` 的分享地址和全部 Session ID。网页顶部可以切换 Session；选中的 ID 会写入地址栏，因此复制当前网址就能让同事直接打开同一会话。不同浏览器可以同时停留在不同 Session，互不抢占选择状态。其他设备无法连接时，请在当前系统防火墙中允许 Python/Codex 访问局域网；脚本不会自动修改防火墙。
+
+源码环境也可以直接使用统一入口：
+
+```sh
+python -m lan_codex_share --config=lan_config.toml
+python -m lan_codex_share cli --config=lan_config.toml --session <Session ID>
+```
 
 网页端采用 Codex 风格的任务界面，支持 Enter 发送、Shift+Enter 换行、拖拽图片和 Ctrl+V 粘贴图片。它直接投影真实 Session：回复、可读的思考摘要、命令输出、工具调用和文件修改都会实时流式显示；执行中自动展开过程，完成后默认折叠，可随时手动重开。隐藏的原始推理链不会对外展示。
 

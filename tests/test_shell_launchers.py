@@ -21,5 +21,5 @@ def test_shell_launchers_are_posix_and_portable():
 
 
 def test_shell_launchers_target_expected_modules():
-    assert "-m lan_codex_share.lan_main" in script_text("start_lan_codex_share.sh")
-    assert "-m lan_codex_share.lan_cli" in script_text("open_lan_codex_cli.sh")
+    assert 'exec "$PYTHON" -m lan_codex_share --config' in script_text("start_lan_codex_share.sh")
+    assert 'exec "$PYTHON" -m lan_codex_share cli --config' in script_text("open_lan_codex_cli.sh")

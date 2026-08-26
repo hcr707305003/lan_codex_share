@@ -9,7 +9,9 @@ from lan_codex_share.lan_main import (
     _unlock_stream,
     local_private_addresses,
     main,
+    run,
 )
+from lan_codex_share.lan_config import LanConfig
 
 
 class FakeStream:
@@ -37,6 +39,18 @@ def test_local_addresses_include_loopback():
 def test_missing_config_returns_error(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert main(["--config", "missing.toml"]) == 2
+
+
+def test_runtime_directory_is_next_to_config(tmp_path, monkeypatch):
+    config_path = tmp_path / "configs" / "team.toml"
+    config_path.parent.mkdir()
+    captured = []
+    monkeypatch.setattr("lan_codex_share.lan_main.load_lan_config", lambda path: LanConfig(workspace=tmp_path))
+    monkeypatch.setattr("lan_codex_share.lan_main._configure_logging", lambda runtime, level: captured.append(runtime))
+    monkeypatch.setattr("lan_codex_share.lan_main.shutil.which", lambda command: None)
+
+    assert run(config_path) == 3
+    assert captured == [config_path.parent / "runtime" / "lan"]
 
 
 def test_single_instance_lock(tmp_path):

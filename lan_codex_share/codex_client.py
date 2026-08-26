@@ -172,8 +172,8 @@ class CodexClient:
                         raise CodexClientError(
                             f"目标 Session {thread_id} 正被旧 Codex/VS Code 写入端占用。"
                             "请关闭旧客户端中的该会话，再重新运行共享启动器；"
-                            "共享服务启动后，本机请改用 open_lan_codex_cli.cmd "
-                            "或 ./open_lan_codex_cli.sh。"
+                            "共享服务启动后，本机请改用 lan_codex_share cli 子命令；"
+                            "源码环境也可使用 open_lan_codex_cli.cmd/.sh。"
                         ) from exc
                     raise CodexClientError(
                         f"无法恢复指定 Session {thread_id}：{exc.message}"

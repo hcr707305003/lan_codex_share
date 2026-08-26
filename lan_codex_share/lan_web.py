@@ -35,6 +35,9 @@ class LanWebApplication:
         self.csrf_token = secrets.token_urlsafe(32)
         self.logger = logger or logging.getLogger(__name__)
         self.web_root = Path(__file__).with_name("web")
+        missing_assets = [name for name in ("index.html", "app.js", "style.css") if not (self.web_root / name).is_file()]
+        if missing_assets:
+            raise FileNotFoundError(f"Web 静态资源不完整：{', '.join(missing_assets)}")
         self.file_viewer = WorkspaceFileViewer(workspace or Path.cwd(), preview_roots=preview_roots)
 
     def create_server(self, host: str, port: int) -> ThreadingHTTPServer:

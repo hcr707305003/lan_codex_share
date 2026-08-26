@@ -2,6 +2,8 @@ import http.client
 import json
 import threading
 
+import pytest
+
 from lan_codex_share.lan_store import ImageStore
 from lan_codex_share.lan_web import LanWebApplication
 
@@ -120,6 +122,14 @@ def mutation_headers(server, csrf):
         "Content-Type": "application/json",
         "X-CSRF-Token": csrf,
     }
+
+
+def test_web_application_rejects_missing_frozen_assets(tmp_path, monkeypatch):
+    monkeypatch.setattr("lan_codex_share.lan_web.__file__", str(tmp_path / "lan_web.py"))
+    images = ImageStore(tmp_path / "uploads", max_bytes=1024, max_images=1)
+
+    with pytest.raises(FileNotFoundError, match="Web 静态资源不完整"):
+        LanWebApplication(FakeService(), images, {"127.0.0.1"}, max_request_bytes=2048, workspace=tmp_path)
 
 
 def test_page_snapshot_and_message_post(tmp_path):

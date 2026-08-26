@@ -17,7 +17,7 @@ if not exist "lan_config.toml" (
   exit /b 2
 )
 
-".venv\Scripts\python.exe" -m lan_codex_share.lan_main --config lan_config.toml
+".venv\Scripts\python.exe" -m lan_codex_share --config lan_config.toml
 set "SHARE_EXIT=%ERRORLEVEL%"
 if not "%SHARE_EXIT%"=="0" (
   echo.

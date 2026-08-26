@@ -21,4 +21,4 @@ if [ ! -f "$CONFIG" ]; then
   exit 2
 fi
 
-exec "$PYTHON" -m lan_codex_share.lan_main --config "$CONFIG" "$@"
+exec "$PYTHON" -m lan_codex_share --config "$CONFIG" "$@"
