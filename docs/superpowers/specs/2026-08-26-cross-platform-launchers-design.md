@@ -17,7 +17,7 @@
 
 两个 Shell 脚本使用 POSIX `sh` 语法，不依赖 Bash 专属功能。脚本根据自身路径切换到项目根目录，避免调用者当前工作目录影响配置和运行数据位置。
 
-脚本固定使用项目虚拟环境中的 `.venv/bin/python`，不回退到系统 Python，以确保依赖版本明确。若虚拟环境或 `lan_config.toml` 不存在，脚本输出可直接复制执行的安装或配置提示，并使用非零状态码退出。
+脚本固定使用项目虚拟环境，不回退到系统 Python，以确保依赖版本明确。优先探测 POSIX 虚拟环境的 `.venv/bin/python`，随后探测 Windows Git Bash 可执行的 `.venv/Scripts/python.exe`。若两者都不存在或 `lan_config.toml` 不存在，脚本输出可直接复制执行的安装或配置提示，并使用非零状态码退出。
 
 `open_lan_codex_cli.sh` 将调用参数原样转发给 `lan_codex_share.lan_cli`，因此支持：
 
@@ -50,7 +50,7 @@ README 将项目描述调整为跨平台，并分别说明：
 
 ## 错误处理
 
-- 缺少 `.venv/bin/python`：退出码 `1`，提示创建虚拟环境和安装依赖。
+- 缺少可用的 `.venv/bin/python` 或 `.venv/Scripts/python.exe`：退出码 `1`，提示创建虚拟环境和安装依赖。
 - 缺少 `lan_config.toml`：退出码 `2`，提示复制示例配置。
 - Python 服务或 CLI 启动失败：返回底层进程退出码。
 - 单实例锁冲突：沿用应用现有启动失败流程，不启动第二个服务。
