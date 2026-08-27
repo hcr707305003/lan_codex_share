@@ -57,6 +57,7 @@ jobs:
         shell: bash
         run: python scripts/check_version.py "$GITHUB_REF_NAME"
       - name: Validate release notes
+        shell: bash
         run: python scripts/check_release_notes.py "$GITHUB_REF_NAME"
       - name: Build executable
         run: python -m PyInstaller --clean --noconfirm lan_codex_share.spec
