@@ -3,6 +3,7 @@ import json
 import logging
 from http.server import ThreadingHTTPServer
 import threading
+from urllib.parse import quote
 
 import pytest
 
@@ -99,7 +100,7 @@ class FakeService:
         self.subscribers.discard(subscriber)
 
 
-def start_app(tmp_path):
+def start_app(tmp_path, *, password=""):
     service = FakeService()
     images = ImageStore(tmp_path / "uploads", max_bytes=1024 * 1024, max_images=4)
     app = LanWebApplication(
@@ -108,6 +109,7 @@ def start_app(tmp_path):
         {"127.0.0.1", "localhost"},
         max_request_bytes=2 * 1024 * 1024,
         workspace=tmp_path,
+        password=password,
     )
     server = app.create_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -134,6 +136,16 @@ def mutation_headers(server, csrf):
         "Content-Type": "application/json",
         "X-CSRF-Token": csrf,
     }
+
+
+def login(server, csrf, password):
+    return request(
+        server,
+        "POST",
+        "/api/auth/login",
+        json.dumps({"password": password}).encode(),
+        mutation_headers(server, csrf),
+    )
 
 
 @pytest.mark.parametrize("error", [ConnectionAbortedError(), ConnectionResetError(), BrokenPipeError()])
@@ -213,6 +225,10 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b'id="scroll-to-bottom"' in page
         assert b'aria-label="\xe5\x9b\x9e\xe5\x88\xb0\xe6\x9c\x80\xe6\x96\xb0\xe6\xb6\x88\xe6\x81\xaf"' in page
         assert b'id="image-lightbox"' in page
+        assert b'id="auth-gate"' in page
+        assert b'id="auth-form"' in page
+        assert b'for="auth-password"' in page
+        assert b'autocomplete="current-password"' in page
         assert b'aria-label="\xe5\x85\xb3\xe9\x97\xad\xe5\x9b\xbe\xe7\x89\x87\xe9\xa2\x84\xe8\xa7\x88"' in page
         assert b'aria-atomic="true"' in page
         assert b'id="clear"' not in page
@@ -268,6 +284,15 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b"event.preventDefault()" in script
         assert b"imageLightbox.addEventListener('cancel'" in script
         assert b"button.setAttribute('aria-label', `\xe6\x94\xbe\xe5\xa4\xa7\xe6\x9f\xa5\xe7\x9c\x8b ${label}`)" in script
+        assert b"bootstrapAuthentication()" in script
+        assert b"function startEvents()" in script
+        assert b"let events = null" in script
+        assert b"new EventSource('/api/events')" in script
+        assert b"const events = new EventSource" not in script
+
+        status, _, auth_status = request(server, "GET", "/api/auth/status")
+        assert status == 200
+        assert json.loads(auth_status) == {"required": False, "authenticated": True}
 
         status, _, snapshot = request(server, "GET", "/api/snapshot")
         assert status == 200
@@ -282,6 +307,101 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert status == 202
         assert json.loads(result)["message_id"] == "message-1"
         assert service.submitted == [("thread-web", "hello", [], "127.0.0.1")]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+
+
+def test_password_authentication_protects_data_routes_and_uses_session_cookie(tmp_path):
+    app, service, server, thread = start_app(tmp_path, password="team secret")
+    markdown = tmp_path / "protected.md"
+    markdown.write_text("# Protected", encoding="utf-8")
+    image_id = "a" * 32
+    (app.image_store.directory / f"{image_id}.png").write_bytes(b"png-data")
+    try:
+        assert request(server, "GET", "/")[0] == 200
+        assert request(server, "GET", "/app.js")[0] == 200
+        status, _, body = request(server, "GET", "/api/auth/status")
+        assert status == 200
+        assert json.loads(body) == {"required": True, "authenticated": False}
+
+        for path in (
+            "/api/snapshot",
+            "/api/events",
+            f"/api/images/{image_id}",
+            f"/api/files/view?path={quote(str(markdown))}",
+        ):
+            assert request(server, "GET", path)[0] == 401
+        assert request(
+            server,
+            "POST",
+            "/api/messages",
+            json.dumps({"text": "blocked", "images": []}).encode(),
+            mutation_headers(server, app.csrf_token),
+        )[0] == 401
+        assert service.submitted == []
+
+        assert login(server, app.csrf_token, "wrong")[0] == 401
+        status, response_headers, body = login(server, app.csrf_token, "team secret")
+        assert status == 200
+        assert json.loads(body) == {"authenticated": True}
+        set_cookie = dict(response_headers)["Set-Cookie"]
+        assert "lan_codex_auth=" in set_cookie
+        assert "Path=/" in set_cookie
+        assert "HttpOnly" in set_cookie
+        assert "SameSite=Strict" in set_cookie
+        assert "Expires=" not in set_cookie
+        assert "Max-Age=" not in set_cookie
+        cookie = set_cookie.split(";", 1)[0]
+
+        status, _, body = request(server, "GET", "/api/auth/status", headers={"Cookie": cookie})
+        assert status == 200
+        assert json.loads(body) == {"required": True, "authenticated": True}
+        assert request(server, "GET", "/api/snapshot", headers={"Cookie": cookie})[0] == 200
+        assert request(server, "GET", f"/api/images/{image_id}", headers={"Cookie": cookie})[0] == 200
+        assert request(
+            server,
+            "GET",
+            f"/api/files/view?path={quote(str(markdown))}",
+            headers={"Cookie": cookie},
+        )[0] == 200
+
+        headers = mutation_headers(server, app.csrf_token)
+        headers["Cookie"] = cookie
+        payload = json.dumps({"text": "allowed", "images": []}).encode()
+        assert request(server, "POST", "/api/messages", payload, headers)[0] == 202
+        assert service.submitted == [("thread-web", "allowed", [], "127.0.0.1")]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+
+
+def test_password_login_rate_limit_expires_and_success_clears_failures(tmp_path, monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr("lan_codex_share.lan_web.time.monotonic", lambda: now[0])
+    app, _, server, thread = start_app(tmp_path, password="team secret")
+    try:
+        for _ in range(5):
+            assert login(server, app.csrf_token, "wrong")[0] == 401
+        assert login(server, app.csrf_token, "team secret")[0] == 429
+
+        now[0] += 61
+        assert login(server, app.csrf_token, "team secret")[0] == 200
+        assert app.login_failures == {}
+        assert login(server, app.csrf_token, "wrong")[0] == 401
+        assert len(app.login_failures["127.0.0.1"]) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+
+
+def test_password_authentication_accepts_unicode_passwords(tmp_path):
+    app, _, server, thread = start_app(tmp_path, password="团队密码")
+    try:
+        assert login(server, app.csrf_token, "团队密码")[0] == 200
     finally:
         server.shutdown()
         server.server_close()
@@ -362,8 +482,6 @@ def test_workspace_file_preview_route_and_boundary(tmp_path):
     outside.write_text("secret", encoding="utf-8")
     app, service, server, thread = start_app(tmp_path)
     try:
-        from urllib.parse import quote
-
         status, _, body = request(server, "GET", f"/api/files/view?path={quote(str(markdown))}")
         assert status == 200
         preview = json.loads(body)

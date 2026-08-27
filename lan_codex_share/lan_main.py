@@ -229,6 +229,7 @@ def run(config_path: str | Path) -> int:
         max_request_bytes=request_limit,
         workspace=config.workspace,
         preview_roots=config.preview_roots,
+        password=config.password,
         logger=logging.getLogger("lan.web"),
     )
     server = None

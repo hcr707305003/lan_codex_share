@@ -25,6 +25,7 @@ class LanConfig:
     preview_roots: tuple[Path, ...] = ()
     session_ids: tuple[str, ...] | None = None
     permission_mode: str = "danger-full-access"
+    password: str = ""
 
     @property
     def session_id(self) -> str | None:
@@ -104,6 +105,9 @@ def load_lan_config(path: str | Path) -> LanConfig:
     if permission_mode not in PERMISSION_MODES:
         choices = "、".join(sorted(PERMISSION_MODES))
         raise LanConfigError(f"permission_mode 必须是以下值之一：{choices}")
+    password = data.get("password", "")
+    if not isinstance(password, str):
+        raise LanConfigError("password 必须是字符串")
     preview_roots_raw = data.get("preview_roots", [])
     if not isinstance(preview_roots_raw, list) or not all(isinstance(item, str) for item in preview_roots_raw):
         raise LanConfigError("preview_roots 必须是路径字符串数组")
@@ -130,4 +134,5 @@ def load_lan_config(path: str | Path) -> LanConfig:
         preview_roots=tuple(preview_roots),
         session_ids=session_ids,
         permission_mode=permission_mode,
+        password=password,
     )

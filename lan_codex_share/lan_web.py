@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from http.cookies import CookieError, SimpleCookie
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hmac
 import json
 import logging
 from pathlib import Path
@@ -9,12 +11,26 @@ import queue
 import secrets
 import sys
 import threading
+import time
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
 from .lan_access import AccessDenied, is_lan_client, validate_host, validate_mutating_request
 from .lan_store import ImageStore, ImageValidationError
 from .workspace_files import WorkspaceFileError, WorkspaceFileViewer
+
+
+AUTH_COOKIE_NAME = "lan_codex_auth"
+LOGIN_FAILURE_LIMIT = 5
+LOGIN_FAILURE_WINDOW_SECONDS = 60
+
+
+class AuthenticationRequired(Exception):
+    pass
+
+
+class LoginRateLimited(Exception):
+    pass
 
 
 class LanThreadingHTTPServer(ThreadingHTTPServer):
@@ -39,6 +55,7 @@ class LanWebApplication:
         max_request_bytes: int,
         workspace: str | Path | None = None,
         preview_roots: tuple[Path, ...] = (),
+        password: str = "",
         logger: logging.Logger | None = None,
     ):
         self.service = service
@@ -46,12 +63,51 @@ class LanWebApplication:
         self.allowed_hosts = allowed_hosts
         self.max_request_bytes = max_request_bytes
         self.csrf_token = secrets.token_urlsafe(32)
+        self.password = password
+        self.auth_token = secrets.token_urlsafe(32) if password else ""
+        self.login_failures: dict[str, list[float]] = {}
+        self.auth_lock = threading.Lock()
         self.logger = logger or logging.getLogger(__name__)
         self.web_root = Path(__file__).with_name("web")
         missing_assets = [name for name in ("index.html", "app.js", "style.css") if not (self.web_root / name).is_file()]
         if missing_assets:
             raise FileNotFoundError(f"Web 静态资源不完整：{', '.join(missing_assets)}")
         self.file_viewer = WorkspaceFileViewer(workspace or Path.cwd(), preview_roots=preview_roots)
+
+    @property
+    def password_required(self) -> bool:
+        return bool(self.password)
+
+    def is_authenticated(self, cookie_header: str) -> bool:
+        if not self.password_required:
+            return True
+        cookie = SimpleCookie()
+        try:
+            cookie.load(cookie_header)
+        except CookieError:
+            return False
+        morsel = cookie.get(AUTH_COOKIE_NAME)
+        return morsel is not None and hmac.compare_digest(morsel.value, self.auth_token)
+
+    def authenticate(self, password: str, source_ip: str) -> str:
+        if not self.password_required:
+            return ""
+        now = time.monotonic()
+        with self.auth_lock:
+            failures = [
+                recorded
+                for recorded in self.login_failures.get(source_ip, [])
+                if now - recorded < LOGIN_FAILURE_WINDOW_SECONDS
+            ]
+            if len(failures) >= LOGIN_FAILURE_LIMIT:
+                self.login_failures[source_ip] = failures
+                raise LoginRateLimited("密码尝试过多，请稍后再试")
+            if hmac.compare_digest(password.encode("utf-8"), self.password.encode("utf-8")):
+                self.login_failures.pop(source_ip, None)
+                return self.auth_token
+            failures.append(now)
+            self.login_failures[source_ip] = failures
+        raise AuthenticationRequired("密码错误")
 
     def create_server(self, host: str, port: int) -> ThreadingHTTPServer:
         server = LanThreadingHTTPServer((host, port), LanRequestHandler)
@@ -89,8 +145,13 @@ class LanRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _json(self, status: int, value: Any) -> None:
-        self._send_bytes(status, json.dumps(value, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+    def _json(self, status: int, value: Any, headers: dict[str, str] | None = None) -> None:
+        self._send_bytes(
+            status,
+            json.dumps(value, ensure_ascii=False).encode("utf-8"),
+            "application/json; charset=utf-8",
+            headers,
+        )
 
     def _error(self, status: int, message: str) -> None:
         self._json(status, {"error": message})
@@ -109,6 +170,10 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 expected_csrf=self.app.csrf_token,
                 allowed_hosts=self.app.allowed_hosts,
             )
+
+    def _require_authentication(self) -> None:
+        if not self.app.is_authenticated(self.headers.get("Cookie", "")):
+            raise AuthenticationRequired("需要密码登录")
 
     def do_GET(self) -> None:
         try:
@@ -136,6 +201,16 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             if path == "/style.css":
                 self._serve_asset("style.css", "text/css; charset=utf-8")
                 return
+            if path == "/api/auth/status":
+                self._json(
+                    HTTPStatus.OK,
+                    {
+                        "required": self.app.password_required,
+                        "authenticated": self.app.is_authenticated(self.headers.get("Cookie", "")),
+                    },
+                )
+                return
+            self._require_authentication()
             if path == "/api/snapshot":
                 session_id = parse_qs(request_url.query, keep_blank_values=True).get("session_id", [None])[0]
                 self._json(HTTPStatus.OK, self.app.service.snapshot(session_id))
@@ -151,6 +226,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self._serve_workspace_file(raw_path)
                 return
             self._error(HTTPStatus.NOT_FOUND, "页面不存在")
+        except AuthenticationRequired as exc:
+            self._error(HTTPStatus.UNAUTHORIZED, str(exc))
         except AccessDenied as exc:
             self._error(HTTPStatus.FORBIDDEN, str(exc))
         except ValueError as exc:
@@ -230,6 +307,19 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 raise ValueError("JSON 必须是对象")
             path = urlsplit(self.path).path
             source_ip = str(self.client_address[0])
+            if path == "/api/auth/login":
+                raw_password = payload.get("password")
+                if not isinstance(raw_password, str):
+                    raise ValueError("password 必须是字符串")
+                token = self.app.authenticate(raw_password, source_ip)
+                headers = None
+                if token:
+                    headers = {
+                        "Set-Cookie": f"{AUTH_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict"
+                    }
+                self._json(HTTPStatus.OK, {"authenticated": True}, headers)
+                return
+            self._require_authentication()
             session_id = self.app.service.resolve_session_id(payload.get("session_id"))
             if path == "/api/messages":
                 raw_images = payload.get("images", [])
@@ -285,6 +375,10 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self._error(HTTPStatus.GONE, "页面现在以真实 Codex Session 为准，不能单独清空网页历史")
                 return
             self._error(HTTPStatus.NOT_FOUND, "接口不存在")
+        except LoginRateLimited as exc:
+            self._error(HTTPStatus.TOO_MANY_REQUESTS, str(exc))
+        except AuthenticationRequired as exc:
+            self._error(HTTPStatus.UNAUTHORIZED, str(exc))
         except AccessDenied as exc:
             self._error(HTTPStatus.FORBIDDEN, str(exc))
         except (ValueError, ImageValidationError) as exc:

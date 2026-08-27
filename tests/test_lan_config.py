@@ -30,6 +30,7 @@ def test_load_lan_config_defaults(tmp_path):
     assert not config.discover_all_sessions
     assert config.session_id is None
     assert config.permission_mode == "danger-full-access"
+    assert config.password == ""
 
 
 def test_loads_session_and_permission_mode(tmp_path):
@@ -55,6 +56,23 @@ def test_loads_multiple_sessions(tmp_path):
 
     assert config.session_ids == ("session-a", "session-b")
     assert config.session_id == "session-a"
+
+
+def test_loads_password_without_trimming(tmp_path):
+    config_path = tmp_path / "lan_config.toml"
+    write_config(config_path, tmp_path, 'password = "  team secret  "\n')
+
+    config = load_lan_config(config_path)
+
+    assert config.password == "  team secret  "
+
+
+def test_rejects_non_string_password(tmp_path):
+    config_path = tmp_path / "lan_config.toml"
+    write_config(config_path, tmp_path, "password = 123456\n")
+
+    with pytest.raises(LanConfigError, match="password"):
+        load_lan_config(config_path)
 
 
 def test_explicit_empty_session_ids_enables_discovery(tmp_path):

@@ -96,6 +96,7 @@ session_ids = [
   "01yyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
 ]
 permission_mode = "danger-full-access"
+password = ""
 host = "0.0.0.0"
 port = 8765
 app_server_port = 4500
@@ -113,7 +114,8 @@ preview_roots = [
 - `permission_mode = "read-only"`：只读访问。
 - `permission_mode = "workspace-write"`：允许修改工作区。
 - `permission_mode = "danger-full-access"`：完全访问本机文件系统。
+- `password = ""`：不启用登录；设置非空字符串后，浏览器需要先输入该密码。登录状态只保留到浏览器关闭或桥接器重启，真实密码只应写入已忽略的 `lan_config.toml`。
 
 网页目前没有交互式审批弹窗，因此审批策略固定为 `never`；实际访问范围由 `permission_mode` 限制。本机 CLI 会连接所选 Session，并采用相同权限模式。
 
-局域网入口没有账号或密码。任何能访问地址的局域网设备都可以读取共享聊天记录、发送任务、上传图片、取消当前任务，并在配置的权限范围内操作本机文件。`session_ids = []` 还会把发现到的所有 Session 项目目录加入文件预览授权范围。只应在可信局域网内使用，不要进行公网端口映射。
+密码留空时，任何能访问地址的局域网设备都可以读取共享聊天记录、发送任务、上传图片、取消当前任务，并在配置的权限范围内操作本机文件。配置非空密码可以阻止误入和普通未授权访问，但默认局域网 HTTP 仍可能被嗅探；需要更强保护时应在 HTTPS 反向代理后使用。`session_ids = []` 还会把发现到的所有 Session 项目目录加入文件预览授权范围。不要进行公网端口映射。

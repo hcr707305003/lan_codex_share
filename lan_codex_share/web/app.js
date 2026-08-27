@@ -1,6 +1,11 @@
 'use strict';
 
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
+const authGate = document.getElementById('auth-gate');
+const authForm = document.getElementById('auth-form');
+const authPassword = document.getElementById('auth-password');
+const authMessage = document.getElementById('auth-message');
+const authSubmit = document.getElementById('auth-submit');
 const timeline = document.getElementById('timeline');
 const scrollToBottomButton = document.getElementById('scroll-to-bottom');
 const input = document.getElementById('input');
@@ -71,6 +76,8 @@ let currentFileReference = null;
 let previewReturnFocus = null;
 let previewRequestId = 0;
 let lightboxReturnFocus = null;
+let events = null;
+let appAuthenticated = false;
 const manuallyExpanded = new Set();
 const manuallyCollapsed = new Set();
 const collapsedProjects = new Set();
@@ -153,6 +160,41 @@ function stateLabel(status) {
 function setNotice(text, isError = false) {
   notice.textContent = text;
   notice.classList.toggle('error', isError);
+}
+
+function showAuthentication(message = '', isError = false) {
+  appAuthenticated = false;
+  refreshQueued = false;
+  if (events) { events.close(); events = null; }
+  appShell.inert = true;
+  appShell.setAttribute('aria-hidden', 'true');
+  authGate.hidden = false;
+  authMessage.textContent = message;
+  authMessage.classList.toggle('error', isError);
+  requestAnimationFrame(() => authPassword.focus({preventScroll: true}));
+}
+
+function hideAuthentication() {
+  authGate.hidden = true;
+  appShell.inert = false;
+  appShell.removeAttribute('aria-hidden');
+  authMessage.textContent = '';
+  authMessage.classList.remove('error');
+  authPassword.value = '';
+}
+
+function handleUnauthorized(response) {
+  if (response.status !== 401) return false;
+  showAuthentication('登录状态已失效，请重新输入密码。', true);
+  return true;
+}
+
+async function authenticationStatus() {
+  const response = await fetch('/api/auth/status', {cache: 'no-store'});
+  let result = {};
+  try { result = await response.json(); } catch (_) { /* use generic error */ }
+  if (!response.ok) throw new Error(result.error || '无法检查登录状态');
+  return result;
 }
 
 function displayTime(value) {
@@ -511,6 +553,7 @@ async function openFilePreview(reference) {
   try {
     const endpoint = fileEndpoint(reference.path);
     const response = await fetch(endpoint, {cache: 'no-store'});
+    if (handleUnauthorized(response)) throw new Error('需要密码登录');
     if (requestId !== previewRequestId) return;
     if (!response.ok) {
       let message = '无法读取文件';
@@ -953,6 +996,7 @@ function renderModelControls(snapshot, processing, queueSize) {
 }
 
 async function refresh() {
+  if (!appAuthenticated) return;
   if (refreshing) { refreshQueued = true; return; }
   refreshing = true;
   const generation = selectionGeneration;
@@ -961,6 +1005,7 @@ async function refresh() {
     const response = await fetch(`/api/snapshot${query}`, {cache: 'no-store'});
     let snapshot = {};
     try { snapshot = await response.json(); } catch (_) { /* use generic error */ }
+    if (handleUnauthorized(response)) throw new Error(snapshot.error || '需要密码登录');
     if (!response.ok) throw new Error(snapshot.error || '无法读取共享会话');
     if (generation === selectionGeneration) render(snapshot);
   } finally {
@@ -981,8 +1026,47 @@ async function mutateForSession(path, sessionId, payload = {}) {
   });
   let result = {};
   try { result = await response.json(); } catch (_) { /* use generic error */ }
+  if (handleUnauthorized(response)) throw new Error(result.error || '需要密码登录');
   if (!response.ok) throw new Error(result.error || '请求失败');
   return result;
+}
+
+function startEvents() {
+  if (events) return;
+  events = new EventSource('/api/events');
+  events.addEventListener('update', () => refresh().catch(error => setNotice(error.message, true)));
+  events.onopen = () => { if (!latestSnapshot?.last_error) setNotice('已连接真实 Codex Session。'); };
+  events.onerror = async () => {
+    try {
+      const status = await authenticationStatus();
+      if (status.required && !status.authenticated) {
+        showAuthentication('登录状态已失效，请重新输入密码。', true);
+        return;
+      }
+    } catch (_) { /* keep EventSource retry behavior */ }
+    setNotice('实时连接暂时断开，浏览器正在重连…', true);
+  };
+}
+
+async function startAuthenticatedApp() {
+  if (appAuthenticated) return;
+  appAuthenticated = true;
+  hideAuthentication();
+  startEvents();
+  await refresh();
+}
+
+async function bootstrapAuthentication() {
+  try {
+    const status = await authenticationStatus();
+    if (status.required && !status.authenticated) {
+      showAuthentication();
+      return;
+    }
+    await startAuthenticatedApp();
+  } catch (error) {
+    showAuthentication(error.message || '无法连接共享服务，请稍后刷新。', true);
+  }
 }
 
 async function changeSessionConnection(sessionId, reconnect, button) {
@@ -1268,11 +1352,32 @@ mobileScrim.addEventListener('click', closeSidebar);
 timeline.addEventListener('scroll', syncScrollToBottomButton, {passive: true});
 scrollToBottomButton.addEventListener('click', scrollTimelineToBottom);
 
-const events = new EventSource('/api/events');
-events.addEventListener('update', () => refresh().catch(error => setNotice(error.message, true)));
-events.onopen = () => { if (!latestSnapshot?.last_error) setNotice('已连接真实 Codex Session。'); };
-events.onerror = () => setNotice('实时连接暂时断开，浏览器正在重连…', true);
+authForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  authSubmit.disabled = true;
+  authSubmit.setAttribute('aria-busy', 'true');
+  authMessage.textContent = '正在验证…';
+  authMessage.classList.remove('error');
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+      body: JSON.stringify({password: authPassword.value}),
+    });
+    let result = {};
+    try { result = await response.json(); } catch (_) { /* use generic error */ }
+    if (!response.ok) throw new Error(result.error || (response.status === 429 ? '密码尝试过多，请稍后再试' : '密码错误'));
+    await startAuthenticatedApp();
+  } catch (error) {
+    authMessage.textContent = error.message || '无法登录';
+    authMessage.classList.add('error');
+    authPassword.select();
+  } finally {
+    authSubmit.removeAttribute('aria-busy');
+    authSubmit.disabled = false;
+  }
+});
 
 updateSendState();
 syncScrollToBottomButton();
-refresh().catch(error => setNotice(error.message, true));
+bootstrapAuthentication();

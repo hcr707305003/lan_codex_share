@@ -3,6 +3,8 @@ workspace = "../workspace"
 # 填入 ID 数组则只共享指定 Session；删除本配置项则使用单会话自动模式。
 session_ids = []
 permission_mode = "danger-full-access"
+# 留空时不需要密码；设置非空字符串后，访问网页必须先登录。
+password = ""
 host = "0.0.0.0"
 port = 8765
 app_server_port = 4500

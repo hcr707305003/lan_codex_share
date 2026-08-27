@@ -32,6 +32,20 @@
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   </svg>
 
+  <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
+    <form class="auth-card" id="auth-form">
+      <div class="auth-brand" aria-hidden="true"><span class="codex-mark">C</span><strong>Codex</strong></div>
+      <div class="auth-heading">
+        <h1 id="auth-title">访问共享会话</h1>
+        <p>请输入共享者配置的局域网访问密码。</p>
+      </div>
+      <label for="auth-password">访问密码</label>
+      <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+      <p class="auth-message" id="auth-message" role="status" aria-live="polite"></p>
+      <button class="auth-submit" id="auth-submit" type="submit">进入 Codex</button>
+    </form>
+  </section>
+
   <div class="app-shell">
     <div class="mobile-scrim" id="mobile-scrim" hidden></div>
     <aside class="sidebar" id="sidebar" aria-label="任务导航">
