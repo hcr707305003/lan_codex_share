@@ -54,6 +54,7 @@ const filePreview = document.getElementById('file-preview');
 const filePreviewTitle = document.getElementById('file-preview-title');
 const filePreviewPath = document.getElementById('file-preview-path');
 const filePreviewBody = document.getElementById('file-preview-body');
+const filePreviewDownload = document.getElementById('file-preview-download');
 const imageLightbox = document.getElementById('image-lightbox');
 const imageLightboxTitle = document.getElementById('image-lightbox-title');
 const imageLightboxStage = document.getElementById('image-lightbox-stage');
@@ -483,6 +484,23 @@ function fileEndpoint(path) {
   return `/api/files/view?${params}`;
 }
 
+function fileDownloadEndpoint(path) {
+  const params = new URLSearchParams({path});
+  return `/api/files/download?${params}`;
+}
+
+function setFileDownload(reference = null) {
+  if (!reference?.path) {
+    filePreviewDownload.removeAttribute('href');
+    filePreviewDownload.setAttribute('aria-disabled', 'true');
+    filePreviewDownload.tabIndex = -1;
+    return;
+  }
+  filePreviewDownload.href = fileDownloadEndpoint(reference.path);
+  filePreviewDownload.setAttribute('aria-disabled', 'false');
+  filePreviewDownload.removeAttribute('tabindex');
+}
+
 function previewState(message, isError = false) {
   filePreviewBody.replaceChildren(el('div', `file-preview-state${isError ? ' error' : ''}`, message));
 }
@@ -543,6 +561,7 @@ async function openFilePreview(reference) {
   }
   currentFileReference = reference;
   const requestId = ++previewRequestId;
+  setFileDownload();
   appShell.classList.add('preview-open');
   resetOuterLayoutScroll();
   filePreview.setAttribute('aria-hidden', 'false');
@@ -593,6 +612,7 @@ async function openFilePreview(reference) {
         throw new Error('此文件类型不支持浏览器预览');
       }
     }
+    setFileDownload(reference);
     filePreviewBody.focus({preventScroll: true});
   } catch (error) {
     if (requestId === previewRequestId) previewState(error.message || '无法读取文件', true);
@@ -604,6 +624,7 @@ function closeFilePreview() {
   previewRequestId += 1;
   const returnFocus = previewReturnFocus;
   previewReturnFocus = null;
+  setFileDownload();
   filePreviewBody.blur();
   appShell.classList.remove('preview-open');
   filePreview.setAttribute('aria-hidden', 'true');

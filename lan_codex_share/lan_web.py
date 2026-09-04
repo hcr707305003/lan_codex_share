@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from .lan_access import AccessDenied, is_lan_client, validate_host, validate_mutating_request
 from .lan_store import ImageStore, ImageValidationError
-from .workspace_files import WorkspaceFileError, WorkspaceFileViewer
+from .workspace_files import WorkspaceFileError, WorkspaceFilePreview, WorkspaceFileViewer
 
 
 AUTH_COOKIE_NAME = "lan_codex_auth"
@@ -225,6 +225,10 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 raw_path = parse_qs(request_url.query, keep_blank_values=True).get("path", [""])[0]
                 self._serve_workspace_file(raw_path)
                 return
+            if path == "/api/files/download":
+                raw_path = parse_qs(request_url.query, keep_blank_values=True).get("path", [""])[0]
+                self._serve_workspace_download(raw_path)
+                return
             self._error(HTTPStatus.NOT_FOUND, "页面不存在")
         except AuthenticationRequired as exc:
             self._error(HTTPStatus.UNAUTHORIZED, str(exc))
@@ -249,9 +253,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
 
     def _serve_workspace_file(self, raw_path: str) -> None:
         try:
-            if hasattr(self.app.service, "preview_roots"):
-                self.app.file_viewer.set_dynamic_roots(self.app.service.preview_roots)
-            preview = self.app.file_viewer.open(raw_path)
+            preview = self._open_workspace_file(raw_path)
         except WorkspaceFileError as exc:
             self._error(exc.status, str(exc))
             return
@@ -265,6 +267,25 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             preview.mime,
             {"Content-Disposition": f"inline; filename*=UTF-8''{filename}"},
         )
+
+    def _serve_workspace_download(self, raw_path: str) -> None:
+        try:
+            preview = self._open_workspace_file(raw_path)
+        except WorkspaceFileError as exc:
+            self._error(exc.status, str(exc))
+            return
+        filename = quote(preview.name, safe="")
+        self._send_bytes(
+            HTTPStatus.OK,
+            preview.path.read_bytes(),
+            preview.mime,
+            {"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+        )
+
+    def _open_workspace_file(self, raw_path: str) -> WorkspaceFilePreview:
+        if hasattr(self.app.service, "preview_roots"):
+            self.app.file_viewer.set_dynamic_roots(self.app.service.preview_roots)
+        return self.app.file_viewer.open(raw_path)
 
     def _serve_events(self) -> None:
         self.send_response(HTTPStatus.OK)

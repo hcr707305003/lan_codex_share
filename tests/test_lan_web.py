@@ -210,6 +210,11 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b'id="timeline"' in page
         assert b'id="resync"' in page
         assert b'id="file-preview"' in page
+        assert b'id="file-preview-download"' in page
+        assert page.index(b'id="file-preview-refresh"') < page.index(b'id="file-preview-download"')
+        assert page.index(b'id="file-preview-download"') < page.index(b'id="file-preview-close"')
+        assert b'aria-label="\xe4\xb8\x8b\xe8\xbd\xbd\xe5\xbd\x93\xe5\x89\x8d\xe6\x96\x87\xe4\xbb\xb6"' in page
+        assert b'aria-disabled="true"' in page
         assert b'id="clear-queue"' in page
         assert b'id="queue-panel"' in page
         assert b'id="queue-count"' in page
@@ -271,6 +276,9 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b"/api/settings/model" in script
         assert b"selectedSessionId" in script
         assert b"previewReturnFocus" in script
+        assert b"function fileDownloadEndpoint(path)" in script
+        assert b"function setFileDownload(reference = null)" in script
+        assert b"filePreviewDownload.removeAttribute('href')" in script
         assert b"resetOuterLayoutScroll" in script
         assert b"element.scrollTop = 0" in script
         assert b"filePreviewBody.scrollTop = Math.max(0, centeredTop)" in script
@@ -331,6 +339,7 @@ def test_password_authentication_protects_data_routes_and_uses_session_cookie(tm
             "/api/events",
             f"/api/images/{image_id}",
             f"/api/files/view?path={quote(str(markdown))}",
+            f"/api/files/download?path={quote(str(markdown))}",
         ):
             assert request(server, "GET", path)[0] == 401
         assert request(
@@ -366,6 +375,15 @@ def test_password_authentication_protects_data_routes_and_uses_session_cookie(tm
             f"/api/files/view?path={quote(str(markdown))}",
             headers={"Cookie": cookie},
         )[0] == 200
+        status, response_headers, body = request(
+            server,
+            "GET",
+            f"/api/files/download?path={quote(str(markdown))}",
+            headers={"Cookie": cookie},
+        )
+        assert status == 200
+        assert dict(response_headers)["Content-Disposition"].startswith("attachment;")
+        assert body == b"# Protected"
 
         headers = mutation_headers(server, app.csrf_token)
         headers["Cookie"] = cookie
@@ -474,10 +492,15 @@ def test_security_and_control_routes(tmp_path):
 
 
 def test_workspace_file_preview_route_and_boundary(tmp_path):
-    markdown = tmp_path / "design.md"
-    markdown.write_text("# Design", encoding="utf-8")
+    markdown = tmp_path / "设计 规则.md"
+    markdown_bytes = "# 设计\n".encode()
+    markdown.write_bytes(markdown_bytes)
     image = tmp_path / "diagram.png"
     image.write_bytes(b"png-data")
+    unsupported = tmp_path / "archive.zip"
+    unsupported.write_bytes(b"zip-data")
+    oversized = tmp_path / "oversized.txt"
+    oversized.write_bytes(b"x" * (2 * 1024 * 1024 + 1))
     outside = tmp_path.parent / "outside-lan-preview.txt"
     outside.write_text("secret", encoding="utf-8")
     app, service, server, thread = start_app(tmp_path)
@@ -486,7 +509,17 @@ def test_workspace_file_preview_route_and_boundary(tmp_path):
         assert status == 200
         preview = json.loads(body)
         assert preview["kind"] == "markdown"
-        assert preview["content"] == "# Design"
+        assert preview["content"] == "# 设计\n"
+
+        status, headers, body = request(server, "GET", f"/api/files/download?path={quote(str(markdown))}")
+        response_headers = dict(headers)
+        assert status == 200
+        assert response_headers["Content-Type"] == "text/markdown; charset=utf-8"
+        assert response_headers["Content-Length"] == str(len(markdown_bytes))
+        assert response_headers["Content-Disposition"] == (
+            "attachment; filename*=UTF-8''%E8%AE%BE%E8%AE%A1%20%E8%A7%84%E5%88%99.md"
+        )
+        assert body == markdown_bytes
 
         status, headers, body = request(server, "GET", f"/api/files/view?path={quote(str(image))}")
         assert status == 200
@@ -496,6 +529,9 @@ def test_workspace_file_preview_route_and_boundary(tmp_path):
         status, _, body = request(server, "GET", f"/api/files/view?path={quote(str(outside))}")
         assert status == 403
         assert "工作区" in json.loads(body)["error"]
+        assert request(server, "GET", f"/api/files/download?path={quote(str(outside))}")[0] == 403
+        assert request(server, "GET", f"/api/files/download?path={quote(str(unsupported))}")[0] == 415
+        assert request(server, "GET", f"/api/files/download?path={quote(str(oversized))}")[0] == 413
     finally:
         server.shutdown()
         server.server_close()
