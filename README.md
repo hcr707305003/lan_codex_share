@@ -2,6 +2,8 @@
 
 在 Windows、macOS 或 Linux 本机托管一个或多个固定的 Codex Session，并通过浏览器分享给同一局域网内的同事。所有访问者可以切换共享会话，查看各自的聊天历史和实时任务进度，发送文字和 PNG/JPEG/WebP 图片，并在配置权限内操作本地工作区。
 
+社区：[LINUX DO](https://linux.do/)
+
 ## 界面预览
 
 ![LAN Codex Share 网页界面](docs/screenshots/lan-codex-share-overview.png)
