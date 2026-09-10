@@ -184,6 +184,68 @@ def test_model_catalog_and_thread_settings_update(tmp_path):
     finally:
         client.close()
 
+
+def test_astra_fallback_is_selectable_through_shared_session(tmp_path):
+    from lan_codex_share.lan_service import LanChatService
+    from lan_codex_share.session_projection import SessionProjection
+
+    client = CodexClient(tmp_path, StateStore(tmp_path / "state.json"), command=fake_command())
+    service = LanChatService(client, SessionProjection(tmp_path / "uploads"))
+    try:
+        service.start()
+        astra = next(item for item in service.snapshot()["model_catalog"] if item["model"] == "gpt-6-astra")
+        assert astra["display_name"] == "GPT-6 Astra"
+        assert astra["is_default"] is False
+        assert astra["default_reasoning_effort"] == "low"
+        assert [item["value"] for item in astra["supported_reasoning_efforts"]] == [
+            "low", "medium", "high", "xhigh", "max", "ultra",
+        ]
+        for tier in (None, "priority"):
+            settings = service.update_model_settings("gpt-6-astra", "high", tier, "127.0.0.1")
+            assert settings == {
+                "model": "gpt-6-astra", "reasoning_effort": "high", "service_tier": tier,
+            }
+            # Re-read the fake server's state, not only the client's local cache.
+            resumed = client.rpc.request("thread/resume", {"threadId": service.thread_id})
+            assert resumed["model"] == "gpt-6-astra"
+            assert resumed["reasoningEffort"] == "high"
+            assert resumed["serviceTier"] == tier
+            assert service.snapshot()["model_settings"] == settings
+        with pytest.raises(ValueError, match="不支持该速度档位"):
+            service.update_model_settings("gpt-6-astra", "high", "ultrafast", "127.0.0.1")
+    finally:
+        service.close()
+
+
+def test_server_astra_on_later_page_overrides_fallback(tmp_path):
+    class PagedRpc:
+        def request(self, method, params, timeout=30):
+            assert method == "model/list"
+            if "cursor" not in params:
+                return {"data": [{"model": "gpt-5.6-sol"}], "nextCursor": "page-2"}
+            assert params["cursor"] == "page-2"
+            return {"data": [{
+                "id": "astra-server-id", "model": "gpt-6-astra", "displayName": "Server Astra",
+                "isDefault": True, "defaultReasoningEffort": "medium",
+                "supportedReasoningEfforts": [{"reasoningEffort": "medium", "description": "Server effort"}],
+                "defaultServiceTier": "priority", "serviceTiers": [],
+            }]}
+
+    client = CodexClient(tmp_path, StateStore(tmp_path / "state.json"), command=fake_command())
+    client.start = lambda: None
+    client.rpc = PagedRpc()
+    models = client.list_models()
+    astra = [item for item in models if item["model"] == "gpt-6-astra"]
+    assert len(models) == 2
+    assert len(astra) == 1
+    assert astra[0] == {
+        "id": "astra-server-id", "model": "gpt-6-astra", "display_name": "Server Astra",
+        "description": "", "is_default": True, "default_reasoning_effort": "medium",
+        "supported_reasoning_efforts": [{"value": "medium", "description": "Server effort"}],
+        "default_service_tier": "priority", "service_tiers": [],
+    }
+
+
 def test_strict_resume_never_replaces_fixed_session(tmp_path):
     class FailingRpc:
         def request(self, method, _params, timeout=30):

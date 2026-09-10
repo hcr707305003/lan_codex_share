@@ -365,6 +365,25 @@ class CodexClient:
                 })
             cursor = (result or {}).get("nextCursor")
             if not cursor:
+                # Older App Servers can lag behind newly available model IDs.
+                # Prefer server metadata whenever it supplies Astra itself.
+                if not any(item["model"] == "gpt-6-astra" for item in models):
+                    models.append({
+                        "id": "gpt-6-astra",
+                        "model": "gpt-6-astra",
+                        "display_name": "GPT-6 Astra",
+                        "description": "兼容模型条目；实际可用性取决于当前账号和上游服务。",
+                        "is_default": False,
+                        "default_reasoning_effort": "low",
+                        "supported_reasoning_efforts": [
+                            {"value": value, "description": ""}
+                            for value in ("low", "medium", "high", "xhigh", "max", "ultra")
+                        ],
+                        "default_service_tier": None,
+                        "service_tiers": [
+                            {"id": "priority", "name": "Fast", "description": "Priority processing"},
+                        ],
+                    })
                 return models
 
     def list_threads(self) -> list[dict[str, Any]]:
