@@ -33,3 +33,4 @@ logs/
 Thumbs.db
 .bug-hunter/
 .superpowers/
+output/playwright/

@@ -413,7 +413,14 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .answer code { border-radius: 5px; background: var(--surface); padding: .12em .36em; font: .9em ui-monospace, SFMono-Regular, Consolas, monospace; }
 .answer pre, .file-markdown pre { max-width: 100%; overflow: auto; border: 1px solid var(--border); border-radius: 9px; background: var(--code); padding: 12px; }
 .answer pre code { background: transparent; padding: 0; white-space: pre; }
-.answer table, .file-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.markdown-table-scroll { max-width: 100%; margin: 1em 0; overflow-x: auto; border: 1px solid var(--border-strong); border-radius: 8px; }
+.markdown-table-scroll:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.answer table, .file-markdown table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.65; }
+.markdown-table-scroll th, .markdown-table-scroll td { min-width: 120px; padding: 10px 14px; vertical-align: top; overflow-wrap: anywhere; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.markdown-table-scroll th { background: var(--surface); font-weight: 600; }
+.markdown-table-scroll tbody tr:nth-child(even) { background: var(--panel); }
+.markdown-table-scroll th:last-child, .markdown-table-scroll td:last-child { border-right: 0; }
+.markdown-table-scroll tbody tr:last-child td { border-bottom: 0; }
 .answer img, .file-markdown img { max-width: 100%; height: auto; }
 .answer a, .file-markdown a { overflow-wrap: anywhere; }
 .answer a { color: var(--info); text-underline-offset: 3px; }

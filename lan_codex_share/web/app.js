@@ -401,21 +401,70 @@ function appendLink(parent, label, rawTarget, originalToken) {
   parent.append(document.createTextNode(originalToken));
 }
 
-function appendInline(parent, text) {
+function appendInline(parent, text, allowLineBreaks = false) {
   const source = String(text || '');
-  const pattern = /(`[^`]+`|\[([^\]]+)\]\((<[^>\n]+>|[^)\n]+)\))/g;
+  const pattern = /(`[^`]+`|\[([^\]]+)\]\((<[^>\n]+>|[^)\n]+)\)|\*\*([^\n]+?)\*\*|<br\s*\/?>)/gi;
   let cursor = 0;
   for (const match of source.matchAll(pattern)) {
     if (match.index > cursor) parent.append(document.createTextNode(source.slice(cursor, match.index)));
     const token = match[0];
     if (token.startsWith('`')) {
       parent.append(el('code', '', token.slice(1, -1)));
+    } else if (token.startsWith('**')) {
+      const strong = el('strong');
+      appendInline(strong, match[4], allowLineBreaks);
+      parent.append(strong);
+    } else if (/^<br\s*\/?>$/i.test(token)) {
+      parent.append(allowLineBreaks ? el('br') : document.createTextNode(token));
     } else {
       appendLink(parent, match[2], match[3], token);
     }
     cursor = match.index + token.length;
   }
   if (cursor < source.length) parent.append(document.createTextNode(source.slice(cursor)));
+}
+
+function splitTableRow(line) {
+  const cells = [''];
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '\\' && i + 1 < line.length) {
+      const next = line[++i];
+      cells[cells.length - 1] += next === '|' ? '|' : `\\${next}`;
+    } else if (char === '|') {
+      cells.push('');
+    } else {
+      cells[cells.length - 1] += char;
+    }
+  }
+  if (cells.length === 1) return null;
+  if (!cells[0].trim()) cells.shift();
+  if (cells.length && !cells[cells.length - 1].trim()) cells.pop();
+  return cells.length ? cells.map(cell => cell.trim()) : null;
+}
+
+function tableHeaderAt(lines, index) {
+  const headers = splitTableRow(lines[index]);
+  const delimiters = splitTableRow(lines[index + 1] || '');
+  if (!headers || !delimiters || headers.length !== delimiters.length
+      || !delimiters.every(cell => /^:?-{3,}:?$/.test(cell))) return null;
+  return {
+    headers,
+    alignments: delimiters.map(cell => cell.endsWith(':') ? (cell.startsWith(':') ? 'center' : 'right') : 'left'),
+  };
+}
+
+function appendTableRow(section, cells, alignments, isHeader = false) {
+  const row = el('tr');
+  alignments.forEach((alignment, index) => {
+    const cell = el(isHeader ? 'th' : 'td');
+    if (isHeader) cell.scope = 'col';
+    cell.style.textAlign = alignment;
+    // Only this explicit line-break token is supported; arbitrary HTML stays text.
+    appendInline(cell, cells[index] || '', true);
+    row.append(cell);
+  });
+  section.append(row);
 }
 
 function renderMarkdown(text) {
@@ -443,7 +492,8 @@ function renderMarkdown(text) {
     fenceLanguage = '';
   };
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     const fence = line.match(/^```\s*([^\s]*)/);
     if (fence) {
       flushParagraph(); flushList();
@@ -453,6 +503,31 @@ function renderMarkdown(text) {
       continue;
     }
     if (inFence) { fenceLines.push(line); continue; }
+    const tableHeader = tableHeaderAt(lines, index);
+    if (tableHeader) {
+      flushParagraph(); flushList();
+      const wrapper = el('div', 'markdown-table-scroll');
+      wrapper.tabIndex = 0;
+      wrapper.setAttribute('role', 'region');
+      wrapper.setAttribute('aria-label', '表格，可横向滚动');
+      const table = el('table');
+      const head = el('thead');
+      const body = el('tbody');
+      appendTableRow(head, tableHeader.headers, tableHeader.alignments, true);
+      index += 1; // Skip the Markdown delimiter row.
+      while (index + 1 < lines.length) {
+        const next = lines[index + 1];
+        if (/^\s*(?:```|#{1,6}\s|>|[-*+]\s|\d+[.)]\s)/.test(next)) break;
+        const cells = splitTableRow(next);
+        if (!cells) break;
+        appendTableRow(body, cells, tableHeader.alignments);
+        index += 1;
+      }
+      table.append(head, body);
+      wrapper.append(table);
+      root.append(wrapper);
+      continue;
+    }
     const heading = line.match(/^(#{1,3})\s+(.+)$/);
     const bullet = line.match(/^\s*[-*]\s+(.+)$/);
     const numbered = line.match(/^\s*\d+[.)]\s+(.+)$/);
