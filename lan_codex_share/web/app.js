@@ -72,6 +72,8 @@ let selectionGeneration = 0;
 let composing = false;
 let refreshing = false;
 let refreshQueued = false;
+let refreshController = null;
+let refreshTimer = null;
 let dragDepth = 0;
 let currentFileReference = null;
 let previewReturnFocus = null;
@@ -87,6 +89,11 @@ const maxImageBytes = 10 * 1024 * 1024;
 const maxImages = 4;
 const maxRenderedJson = 100 * 1024;
 const bottomRevealThreshold = 160;
+const historyTimeline = new HistoryTimeline({
+  root: timeline, renderTurn,
+  fetchPage: (before, signal) => fetchHistoryPage(before, signal),
+  onError: error => setNotice(error.message, true),
+});
 
 function timelineBottomDistance() {
   return Math.max(0, timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight);
@@ -166,6 +173,11 @@ function setNotice(text, isError = false) {
 function showAuthentication(message = '', isError = false) {
   appAuthenticated = false;
   refreshQueued = false;
+  selectionGeneration += 1;
+  refreshController?.abort();
+  clearTimeout(refreshTimer); refreshTimer = null;
+  historyTimeline.reset();
+  latestSnapshot = null; lastVersion = -1;
   if (events) { events.close(); events = null; }
   appShell.inert = true;
   appShell.setAttribute('aria-hidden', 'true');
@@ -745,6 +757,7 @@ function renderGallery(images) {
     img.src = src;
     img.alt = label;
     img.loading = 'lazy';
+    img.decoding = 'async';
     button.append(img);
     button.addEventListener('click', () => openImageLightbox(src, label, button));
     gallery.append(button);
@@ -914,53 +927,160 @@ function isFinalAnswer(item) {
   return item.phase !== 'commentary';
 }
 
-function renderActivities(turn, items, active) {
-  if (!items.length && !turn.diff) return null;
+function renderActivities(turn, items, active, existing) {
+  const count = turn.activity_count ?? (items.length + (turn.diff ? 1 : 0));
+  if (!count) { existing?.dispose?.(); return null; }
   const turnId = String(turn.id || 'unknown');
-  const details = el('details', 'activity-group');
+  const details = existing || el('details', 'activity-group');
+  if (!existing) {
+    const summary = el('summary');
+    summary.append(icon('chevron', 'chevron'), el('span', 'activity-summary-label'), el('span', 'activity-count'));
+    const list = el('div', 'activity-list');
+    const controls = el('div', 'activity-pagination');
+    const earlier = el('button', '', '更早过程（20 项）');
+    const latest = el('button', '', '最新过程');
+    const notice = el('span', 'secondary');
+    earlier.type = latest.type = 'button';
+    notice.setAttribute('role', 'status');
+    controls.append(earlier, latest, notice);
+    details.append(summary, controls, list);
+    const session = selectedSessionId;
+    const epoch = historyTimeline.epoch;
+    let controller = null;
+    let requestNumber = 0;
+    let shownRevision = -1;
+    let pageBefore = null;
+    let nextBefore = null;
+    let busy = false;
+    let cards = new Map();
+    details.dispose = () => {
+      requestNumber += 1; controller?.abort(); busy = false;
+      cards.clear(); list.replaceChildren(); shownRevision = -1;
+    };
+    const load = async (before = pageBefore, force = false) => {
+      if (!details.open || (busy && !force)) return;
+      if (force) controller?.abort();
+      busy = true;
+      const number = ++requestNumber;
+      let loadedRevision = null;
+      controller = new AbortController();
+      earlier.disabled = latest.disabled = true;
+      notice.textContent = '正在加载过程…';
+      list.setAttribute('aria-busy', 'true');
+      try {
+        let result;
+        if (details.turn.activity_count === undefined) {
+          const values = details.items.slice();
+          if (details.turn.diff) values.push({id: `${turnId}-diff`, type: 'turnDiff', diff: details.turn.diff});
+          result = {items: values.slice(-20), revision: details.turn.history_revision,
+            history: {before: null, start: Math.max(0, values.length - 20), end: values.length, total: values.length}};
+        } else {
+          const query = new URLSearchParams({session_id: session, turn_id: turnId, epoch});
+          if (before) query.set('before', before);
+          result = await fetchHistoryJson(`/api/history/activities?${query}`, controller.signal);
+        }
+        if (number !== requestNumber || !details.isConnected || epoch !== historyTimeline.epoch) return;
+        const anchor = historyTimeline.anchor();
+        const atBottom = timelineBottomDistance() < 120;
+        const nextCards = new Map();
+        const nodes = result.items.map(item => {
+          const signature = JSON.stringify(item);
+          const cached = cards.get(item.id);
+          const node = cached?.signature === signature ? cached.node : renderActivity(item);
+          nextCards.set(item.id, {signature, node});
+          return node;
+        });
+        reconcileHistoryNodes(list, nodes);
+        cards = nextCards;
+        pageBefore = before;
+        nextBefore = result.history.before;
+        shownRevision = result.revision;
+        loadedRevision = result.revision;
+        earlier.hidden = !nextBefore;
+        latest.hidden = before === null;
+        notice.textContent = `${result.history.start + 1}–${result.history.end} / ${result.history.total} 项`;
+        if (atBottom && !before) timeline.scrollTop = timeline.scrollHeight;
+        else historyTimeline.restore(anchor);
+        syncScrollToBottomButton();
+      } catch (error) {
+        if (number === requestNumber && error.name !== 'AbortError') {
+          notice.textContent = `${error.message}，点击“最新过程”重试。`;
+          latest.hidden = false;
+        }
+      } finally {
+        if (number === requestNumber) {
+          busy = false; earlier.disabled = latest.disabled = false;
+          list.setAttribute('aria-busy', 'false');
+          if (loadedRevision !== null && loadedRevision < details.turn.history_revision) queueMicrotask(() => details.sync());
+        }
+      }
+    };
+    details.sync = () => {
+      if (details.open && shownRevision < details.turn.history_revision) load();
+    };
+    earlier.addEventListener('click', () => load(nextBefore, true));
+    latest.addEventListener('click', () => load(null, true));
+    summary.addEventListener('click', () => {
+      if (details.open) { manuallyCollapsed.add(turnId); manuallyExpanded.delete(turnId); }
+      else { manuallyExpanded.add(turnId); manuallyCollapsed.delete(turnId); }
+    });
+    details.addEventListener('toggle', () => {
+      if (details.open) load();
+      else details.dispose();
+    });
+  }
+  details.turn = turn;
+  details.items = items;
+  details.querySelector('.activity-summary-label').textContent = active ? '正在处理' : '查看过程';
+  details.querySelector('.activity-count').textContent = `${count} 项`;
   details.open = manuallyExpanded.has(turnId) || (active && !manuallyCollapsed.has(turnId));
-  const summary = el('summary');
-  summary.append(icon('chevron', 'chevron'));
-  summary.append(el('span', 'activity-summary-label', active ? '正在处理' : '查看过程'));
-  const count = items.length + (turn.diff ? 1 : 0);
-  summary.append(el('span', 'activity-count', `${count} 项`));
-  const list = el('div', 'activity-list');
-  for (const item of items) list.append(renderActivity(item));
-  if (turn.diff) list.append(renderActivity({id: `${turnId}-diff`, type: 'turnDiff', diff: turn.diff}));
-  details.append(summary, list);
-  summary.addEventListener('click', () => {
-    if (details.open) { manuallyCollapsed.add(turnId); manuallyExpanded.delete(turnId); }
-    else { manuallyExpanded.add(turnId); manuallyCollapsed.delete(turnId); }
-  });
+  // Run after insertion so async results cannot attach to detached old sessions.
+  queueMicrotask(() => details.sync());
   return details;
 }
 
-function renderTurn(turn) {
-  const section = el('section', 'turn');
+function renderTurn(turn, existing) {
+  const section = existing || el('section', 'turn');
   section.dataset.turnId = turn.id || '';
+  const nodes = [];
+  const previousMessages = section.messageNodes || new Map();
+  const messages = new Map();
+  const messageNode = (item, create) => {
+    const signature = JSON.stringify(item);
+    const cached = previousMessages.get(item.id);
+    const node = cached?.signature === signature ? cached.node : create();
+    messages.set(item.id, {signature, node});
+    return node;
+  };
   const status = statusValue(turn.status);
   const active = ['inProgress', 'processing', 'streaming'].includes(status);
   const activities = [];
   const answers = [];
   for (const item of turn.items || []) {
-    if (item.type === 'userMessage') section.append(renderUserMessage(item));
+    if (item.type === 'userMessage') nodes.push(messageNode(item, () => renderUserMessage(item)));
     else if (isFinalAnswer(item)) answers.push(item);
     else activities.push(item);
   }
-  const activityGroup = renderActivities(turn, activities, active);
-  if (activityGroup) section.append(activityGroup);
+  const activityGroup = renderActivities(turn, activities, active, section.activityGroup);
+  section.activityGroup = activityGroup;
+  section.dispose = () => { activityGroup?.dispose(); manuallyExpanded.delete(String(turn.id)); manuallyCollapsed.delete(String(turn.id)); };
+  if (activityGroup) nodes.push(activityGroup);
   for (const answer of answers) {
-    const article = el('article', 'message assistant');
-    const meta = el('div', 'message-meta');
-    meta.append(el('span', '', 'Codex'));
-    if (answer.createdAt) meta.append(el('time', '', displayTime(answer.createdAt)));
-    article.append(meta, renderMarkdown(answer.text || ''));
-    section.append(article);
+    nodes.push(messageNode(answer, () => {
+      const article = el('article', 'message assistant');
+      const meta = el('div', 'message-meta');
+      meta.append(el('span', '', 'Codex'));
+      if (answer.createdAt) meta.append(el('time', '', displayTime(answer.createdAt)));
+      article.append(meta, renderMarkdown(answer.text || ''));
+      return article;
+    }));
   }
   if (status && !['completed', 'inProgress', 'processing', 'streaming'].includes(status)) {
-    section.append(el('div', `turn-status ${status}`, `任务${stateLabel(status)}`));
+    nodes.push(el('div', `turn-status ${status}`, `任务${stateLabel(status)}`));
   }
-  if (turn.error) section.append(el('div', 'turn-status failed', typeof turn.error === 'string' ? turn.error : safeJson(turn.error)));
+  if (turn.error) nodes.push(el('div', 'turn-status failed', typeof turn.error === 'string' ? turn.error : safeJson(turn.error)));
+  section.messageNodes = messages;
+  reconcileHistoryNodes(section, nodes);
   return section;
 }
 
@@ -1003,21 +1123,9 @@ function render(snapshot) {
 
   if (snapshot.version === lastVersion) return;
   lastVersion = snapshot.version;
-  const nearBottom = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 120;
-  const previousTop = timeline.scrollTop;
-  const fragment = document.createDocumentFragment();
-  const turns = thread.turns || [];
   const pending = snapshot.pending || [];
   renderQueue(pending);
-  for (const turn of turns) fragment.append(renderTurn(turn));
-  if (!turns.length) {
-    const empty = el('div', 'empty-state');
-    empty.append(el('p', '', pending.length ? '排队消息会在开始处理后出现在这里。' : '这个 Session 还没有消息。'));
-    fragment.append(empty);
-  }
-  timeline.replaceChildren(fragment);
-  if (nearBottom || previousTop === 0) timeline.scrollTop = timeline.scrollHeight;
-  else timeline.scrollTop = previousTop;
+  historyTimeline.update(snapshot);
   syncScrollToBottomButton();
 }
 
@@ -1096,18 +1204,40 @@ async function refresh() {
   if (refreshing) { refreshQueued = true; return; }
   refreshing = true;
   const generation = selectionGeneration;
+  refreshController = new AbortController();
   try {
-    const query = selectedSessionId ? `?session_id=${encodeURIComponent(selectedSessionId)}` : '';
-    const response = await fetch(`/api/snapshot${query}`, {cache: 'no-store'});
-    let snapshot = {};
-    try { snapshot = await response.json(); } catch (_) { /* use generic error */ }
-    if (handleUnauthorized(response)) throw new Error(snapshot.error || '需要密码登录');
-    if (!response.ok) throw new Error(snapshot.error || '无法读取共享会话');
+    const snapshot = await fetchHistoryPage(null, refreshController.signal);
     if (generation === selectionGeneration) render(snapshot);
+  } catch (error) {
+    if (error.name !== 'AbortError') throw error;
   } finally {
     refreshing = false;
-    if (refreshQueued) { refreshQueued = false; refresh().catch(error => setNotice(error.message, true)); }
+    if (refreshQueued) { refreshQueued = false; scheduleRefresh(); }
   }
+}
+
+async function fetchHistoryJson(url, signal) {
+  const response = await fetch(url, {cache: 'no-store', signal});
+  let value = {};
+  try { value = await response.json(); } catch (_) { /* handled below */ }
+  if (handleUnauthorized(response)) throw new Error(value.error || '需要密码登录');
+  if (!response.ok) throw new Error(value.error || '无法读取会话历史');
+  return value;
+}
+
+function fetchHistoryPage(before, signal) {
+  const query = new URLSearchParams({limit: '20'});
+  if (selectedSessionId) query.set('session_id', selectedSessionId);
+  if (before) query.set('before', before);
+  return fetchHistoryJson(`/api/snapshot?${query}`, signal);
+}
+
+function scheduleRefresh() {
+  if (refreshTimer !== null) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    refresh().catch(error => setNotice(error.message, true));
+  }, 150);
 }
 
 async function mutate(path, payload = {}) {
@@ -1130,7 +1260,7 @@ async function mutateForSession(path, sessionId, payload = {}) {
 function startEvents() {
   if (events) return;
   events = new EventSource('/api/events');
-  events.addEventListener('update', () => refresh().catch(error => setNotice(error.message, true)));
+  events.addEventListener('update', scheduleRefresh);
   events.onopen = () => { if (!latestSnapshot?.last_error) setNotice('已连接真实 Codex Session。'); };
   events.onerror = async () => {
     try {
@@ -1268,6 +1398,10 @@ function selectSession(next) {
   if (!next || next === selectedSessionId) return;
   selectedSessionId = next;
   selectionGeneration += 1;
+  refreshController?.abort();
+  historyTimeline.reset();
+  manuallyExpanded.clear(); manuallyCollapsed.clear();
+  latestSnapshot = null;
   lastVersion = -1;
   closeMenu(); closeModelPanel(); closeFilePreview(); closeImageLightbox({restoreFocus: false});
   const loading = el('div', 'initial-loading');

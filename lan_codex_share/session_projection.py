@@ -23,6 +23,9 @@ class SessionProjection:
         self._version = 0
         self._connection = "connecting"
         self._handlers: list[Callable[[], None]] = []
+        self._history_epoch = uuid4().hex
+        self._turns_by_id: dict[str, dict[str, Any]] = {}
+        self._turn_revisions: dict[str, int] = {}
 
     def add_change_handler(self, handler: Callable[[], None]) -> None:
         self._handlers.append(handler)
@@ -48,7 +51,66 @@ class SessionProjection:
         normalized = self._normalize_thread(thread)
         with self._lock:
             self._thread = normalized
+            self._history_epoch = uuid4().hex
+            self._turns_by_id = {str(turn["id"]): turn for turn in normalized["turns"]}
+            self._turn_revisions = dict.fromkeys(self._turns_by_id, 0)
         self._changed()
+
+    def _page_bounds(self, total: int, limit: int, before: str | None) -> tuple[int, int, dict[str, Any]]:
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("每页数量必须为 1 到 50")
+        end = total
+        if before is not None:
+            epoch, separator, position = str(before).partition(":")
+            if not separator or not position.isascii() or not position.isdecimal():
+                raise ValueError("历史游标无效")
+            if epoch != self._history_epoch:
+                raise ValueError("历史已重新同步，请刷新后重试")
+            end = int(position)
+            if not 0 <= end <= total:
+                raise ValueError("历史游标越界")
+        start = max(0, end - limit)
+        return start, end, {
+            "epoch": self._history_epoch, "start": start, "end": end, "total": total,
+            "before": f"{self._history_epoch}:{start}" if start else None,
+        }
+
+    @staticmethod
+    def _is_message(item: dict[str, Any]) -> bool:
+        return item.get("type") == "userMessage" or (
+            item.get("type") == "agentMessage" and item.get("phase") != "commentary"
+        )
+
+    def history_page(self, limit: int = 20, before: str | None = None) -> dict[str, Any]:
+        """Slice before copying. Tool bodies are read separately, on expansion."""
+        with self._lock:
+            turns = self._thread["turns"]
+            start, end, page = self._page_bounds(len(turns), limit, before)
+            thread = {key: deepcopy(value) for key, value in self._thread.items() if key != "turns"}
+            visible = []
+            for turn in turns[start:end]:
+                value = {key: deepcopy(item) for key, item in turn.items() if key not in {"items", "diff"}}
+                value["items"] = [deepcopy(item) for item in turn["items"] if self._is_message(item)]
+                value["activity_count"] = sum(not self._is_message(item) for item in turn["items"]) + bool(turn.get("diff"))
+                value["history_revision"] = self._turn_revisions.get(str(turn["id"]), 0)
+                visible.append(value)
+            thread["turns"] = visible
+            return {"version": self._version, "connection": self._connection, "thread": thread,
+                    "pending": deepcopy(self._pending), "history": page}
+
+    def activities(self, turn_id: str, epoch: str, before: str | None = None, limit: int = 20) -> dict[str, Any]:
+        with self._lock:
+            if epoch != self._history_epoch:
+                raise ValueError("历史已重新同步，请刷新后重试")
+            turn = self._turns_by_id.get(turn_id)
+            if turn is None:
+                raise ValueError("找不到该轮对话")
+            items = [item for item in turn["items"] if not self._is_message(item)]
+            if turn.get("diff"):
+                items.append({"id": f"{turn_id}-diff", "type": "turnDiff", "diff": turn["diff"]})
+            start, end, page = self._page_bounds(len(items), limit, before)
+            return {"turn_id": turn_id, "items": deepcopy(items[start:end]), "history": page,
+                    "revision": self._turn_revisions.get(turn_id, 0)}
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -131,6 +193,11 @@ class SessionProjection:
             if thread_id and current_id and str(thread_id) != str(current_id):
                 return False
             changed = self._apply_notification_locked(method, params)
+            if changed:
+                turn_id = params.get("turnId") or (params.get("turn") or {}).get("id")
+                if turn_id:
+                    key = str(turn_id)
+                    self._turn_revisions[key] = self._turn_revisions.get(key, 0) + 1
         if changed:
             self._changed()
         return changed
@@ -240,6 +307,7 @@ class SessionProjection:
     def _normalize_turn(self, turn: dict[str, Any]) -> dict[str, Any]:
         allowed = ("id", "status", "error", "startedAt", "completedAt", "durationMs", "diff")
         normalized = {key: self._safe_value(turn.get(key)) for key in allowed if key in turn}
+        normalized["id"] = str(turn.get("id") or uuid4().hex)
         normalized["items"] = [self._normalize_item(item) for item in turn.get("items", []) if isinstance(item, dict)]
         return normalized
 
@@ -281,11 +349,11 @@ class SessionProjection:
         return self._safe_value(value)
 
     def _ensure_turn(self, turn_id: str) -> dict[str, Any]:
-        for turn in self._thread.setdefault("turns", []):
-            if str(turn.get("id")) == turn_id:
-                return turn
+        if turn_id in self._turns_by_id:
+            return self._turns_by_id[turn_id]
         turn = {"id": turn_id, "status": "inProgress", "items": []}
         self._thread["turns"].append(turn)
+        self._turns_by_id[turn_id] = turn
         return turn
 
     @staticmethod

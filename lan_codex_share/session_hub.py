@@ -152,13 +152,13 @@ class LanSessionHub:
             self._broadcast()
             return selected, service
 
-    def snapshot(self, session_id: Any = None) -> dict[str, Any]:
+    def snapshot(self, session_id: Any = None, history_limit: int | None = None, before: str | None = None) -> dict[str, Any]:
         if self._catalog_mode and session_id is None:
             with self._lock:
                 if self._default_session_id is None:
                     return self._empty_snapshot()
         selected, service = self._service(session_id)
-        snapshot = service.snapshot()
+        snapshot = service.snapshot() if history_limit is None else service.snapshot(history_limit=history_limit, before=before)
         snapshot["selected_session_id"] = selected
         snapshot["sessions"] = self.session_summaries()
         snapshot["projects"] = self.project_summaries()
@@ -167,6 +167,10 @@ class LanSessionHub:
         with self._lock:
             snapshot["hub_version"] = self._version
         return snapshot
+
+    def activities(self, session_id: Any, turn_id: str, epoch: str, before: str | None = None) -> dict[str, Any]:
+        _selected, service = self._service(session_id)
+        return service.activities(turn_id, epoch, before)
 
     def _empty_snapshot(self) -> dict[str, Any]:
         with self._lock:

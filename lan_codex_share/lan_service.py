@@ -84,8 +84,8 @@ class LanChatService:
         self._worker.start()
         self._broadcast()
 
-    def snapshot(self) -> dict[str, Any]:
-        projected = self.projection.snapshot()
+    def snapshot(self, history_limit: int | None = None, before: str | None = None) -> dict[str, Any]:
+        projected = self.projection.snapshot() if history_limit is None else self.projection.history_page(history_limit, before)
         with self._version_lock:
             version = self._version
         connection = str(projected.get("connection") or "disconnected")
@@ -105,7 +105,11 @@ class LanChatService:
             "model_settings": model_settings,
             "last_error": self._last_error,
             "last_notice": self._last_notice,
+            **({"history": projected["history"]} if "history" in projected else {}),
         }
+
+    def activities(self, turn_id: str, epoch: str, before: str | None = None) -> dict[str, Any]:
+        return self.projection.activities(turn_id, epoch, before)
 
     def summary(self) -> dict[str, Any]:
         projected = self.projection.summary()

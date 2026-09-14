@@ -29,7 +29,7 @@ class FakeService:
             raise ValueError("指定的 Session 不在共享列表中")
         return selected
 
-    def snapshot(self, session_id=None):
+    def snapshot(self, session_id=None, history_limit=None, before=None):
         selected = self.resolve_session_id(session_id)
         return {
             "thread_id": "thread-web",

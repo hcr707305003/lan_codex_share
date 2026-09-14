@@ -77,7 +77,7 @@ class LanWebApplication:
         self.auth_lock = threading.Lock()
         self.logger = logger or logging.getLogger(__name__)
         self.web_root = Path(__file__).with_name("web")
-        missing_assets = [name for name in ("index.html", "app.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
+        missing_assets = [name for name in ("index.html", "app.js", "history.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
         if missing_assets:
             raise FileNotFoundError(f"Web 静态资源不完整：{', '.join(missing_assets)}")
         self.file_viewer = WorkspaceFileViewer(workspace or Path.cwd(), preview_roots=preview_roots)
@@ -211,8 +211,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if path == "/app.js":
-                self._serve_asset("app.js", "text/javascript; charset=utf-8")
+            if path in {"/app.js", "/history.js"}:
+                self._serve_asset(path[1:], "text/javascript; charset=utf-8")
                 return
             if path == "/style.css":
                 self._serve_asset("style.css", "text/css; charset=utf-8")
@@ -231,8 +231,21 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self._serve_asset("proxy-client.js", "text/javascript; charset=utf-8")
                 return
             if path == "/api/snapshot":
-                session_id = parse_qs(request_url.query, keep_blank_values=True).get("session_id", [None])[0]
-                self._json(HTTPStatus.OK, self.app.service.snapshot(session_id))
+                query = parse_qs(request_url.query, keep_blank_values=True)
+                session_id = query.get("session_id", [None])[0]
+                limit = int(query.get("limit", ["20"])[0])
+                if not 1 <= limit <= 50:
+                    raise ValueError("每页数量必须为 1 到 50")
+                self._json(HTTPStatus.OK, self.app.service.snapshot(
+                    session_id, history_limit=limit, before=query.get("before", [None])[0],
+                ))
+                return
+            if path == "/api/history/activities":
+                query = parse_qs(request_url.query, keep_blank_values=True)
+                self._json(HTTPStatus.OK, self.app.service.activities(
+                    query.get("session_id", [None])[0], query.get("turn_id", [""])[0],
+                    query.get("epoch", [""])[0], query.get("before", [None])[0],
+                ))
                 return
             if path == "/api/events":
                 self._serve_events()
