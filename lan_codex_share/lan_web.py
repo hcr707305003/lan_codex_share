@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from http.cookies import CookieError, SimpleCookie
 from http import HTTPStatus
+from ipaddress import ip_address
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
 import json
@@ -15,9 +16,10 @@ import time
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
-from .lan_access import AccessDenied, is_lan_client, validate_host, validate_mutating_request
+from .lan_access import AccessDenied, is_lan_client, normalize_public_origin, request_origin, validate_mutating_request
 from .lan_store import ImageStore, ImageValidationError
 from .workspace_files import WorkspaceFileError, WorkspaceFilePreview, WorkspaceFileViewer
+from .dynamic_proxy import ProxyError, check_browser_origin, forward, parse_target
 
 
 AUTH_COOKIE_NAME = "lan_codex_auth"
@@ -35,6 +37,8 @@ class LoginRateLimited(Exception):
 
 class LanThreadingHTTPServer(ThreadingHTTPServer):
     logger = logging.getLogger(__name__)
+    # Tunnel HTTP/2 fan-out and Vite imports exceed Python 3.11's default of 5.
+    request_queue_size = 128
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         error = sys.exception()
@@ -56,6 +60,8 @@ class LanWebApplication:
         workspace: str | Path | None = None,
         preview_roots: tuple[Path, ...] = (),
         password: str = "",
+        public_origin: str = "",
+        app_server_port: int = 4500,
         logger: logging.Logger | None = None,
     ):
         self.service = service
@@ -64,12 +70,14 @@ class LanWebApplication:
         self.max_request_bytes = max_request_bytes
         self.csrf_token = secrets.token_urlsafe(32)
         self.password = password
+        self.public_origin = normalize_public_origin(public_origin)
+        self.app_server_port = app_server_port
         self.auth_token = secrets.token_urlsafe(32) if password else ""
         self.login_failures: dict[str, list[float]] = {}
         self.auth_lock = threading.Lock()
         self.logger = logger or logging.getLogger(__name__)
         self.web_root = Path(__file__).with_name("web")
-        missing_assets = [name for name in ("index.html", "app.js", "style.css") if not (self.web_root / name).is_file()]
+        missing_assets = [name for name in ("index.html", "app.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
         if missing_assets:
             raise FileNotFoundError(f"Web 静态资源不完整：{', '.join(missing_assets)}")
         self.file_viewer = WorkspaceFileViewer(workspace or Path.cwd(), preview_roots=preview_roots)
@@ -143,7 +151,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             self.send_header(name, value)
         self._security_headers()
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def _json(self, status: int, value: Any, headers: dict[str, str] | None = None) -> None:
         self._send_bytes(
@@ -160,7 +169,11 @@ class LanRequestHandler(BaseHTTPRequestHandler):
         if not is_lan_client(str(self.client_address[0])):
             raise AccessDenied("只允许局域网访问")
         host = self.headers.get("Host", "")
-        validate_host(host, self.app.allowed_hosts)
+        expected_origin = request_origin(host, self.app.allowed_hosts, self.app.public_origin)
+        if self.app.public_origin and expected_origin == self.app.public_origin:
+            # cloudflared must run on this host. Forwarding headers cannot grant trust.
+            if not ip_address(self.client_address[0]).is_loopback:
+                raise AccessDenied("公网入口只接受本机反向代理连接")
         if mutation:
             validate_mutating_request(
                 host=host,
@@ -169,6 +182,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 csrf=self.headers.get("X-CSRF-Token", ""),
                 expected_csrf=self.app.csrf_token,
                 allowed_hosts=self.app.allowed_hosts,
+                public_origin=self.app.public_origin,
             )
 
     def _require_authentication(self) -> None:
@@ -176,6 +190,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             raise AuthenticationRequired("需要密码登录")
 
     def do_GET(self) -> None:
+        if self._try_proxy():
+            return
         try:
             self._guard()
             request_url = urlsplit(self.path)
@@ -211,6 +227,9 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._require_authentication()
+            if path == "/proxy-client.js":
+                self._serve_asset("proxy-client.js", "text/javascript; charset=utf-8")
+                return
             if path == "/api/snapshot":
                 session_id = parse_qs(request_url.query, keep_blank_values=True).get("session_id", [None])[0]
                 self._json(HTTPStatus.OK, self.app.service.snapshot(session_id))
@@ -236,7 +255,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.FORBIDDEN, str(exc))
         except ValueError as exc:
             self._error(HTTPStatus.BAD_REQUEST, str(exc))
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return
         except FileNotFoundError:
             self._error(HTTPStatus.NOT_FOUND, "文件不存在")
@@ -312,6 +331,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             self.app.service.unsubscribe(subscriber)
 
     def do_POST(self) -> None:
+        if self._try_proxy():
+            return
         try:
             self._guard(mutation=True)
             length = int(self.headers.get("Content-Length", "0"))
@@ -335,8 +356,10 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 token = self.app.authenticate(raw_password, source_ip)
                 headers = None
                 if token:
+                    origin = request_origin(self.headers.get("Host", ""), self.app.allowed_hosts, self.app.public_origin)
+                    secure = "; Secure" if origin.startswith("https://") else ""
                     headers = {
-                        "Set-Cookie": f"{AUTH_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict"
+                        "Set-Cookie": f"{AUTH_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict{secure}"
                     }
                 self._json(HTTPStatus.OK, {"authenticated": True}, headers)
                 return
@@ -404,6 +427,68 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.FORBIDDEN, str(exc))
         except (ValueError, ImageValidationError) as exc:
             self._error(HTTPStatus.BAD_REQUEST, str(exc))
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
         except Exception:
             self.app.logger.exception("LAN POST failed")
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "服务内部错误")
+
+    def _try_proxy(self) -> bool:
+        direct = self.path.startswith("/proxy/")
+        # Canonicalize root-relative resources from a proxied page (including ES
+        # module imports) without a global "current target" cookie across tabs.
+        try:
+            referer = urlsplit(self.headers.get("Referer", ""))
+        except ValueError:
+            referer = urlsplit("")
+        fallback = (
+            not direct and self.path.startswith("/") and not self.path.startswith("//")
+            and urlsplit(self.path).path != "/proxy-client.js"
+            and referer.path.startswith("/proxy/")
+        )
+        if not direct and not fallback:
+            return False
+        # Every proxy response closes this HTTP connection, including rejection
+        # paths, so unread upload bytes cannot become a second HTTP request.
+        self.close_connection = True
+        try:
+            self._guard()
+            self._require_authentication()
+            origin = check_browser_origin(self)
+            if fallback:
+                if f"{referer.scheme}://{referer.netloc}" != origin:
+                    raise ProxyError("资源请求 Referer 不允许", 403)
+                target = parse_target(referer.path, {int(self.server.server_port), self.app.app_server_port})
+                self._send_bytes(307, b"", "text/plain", {"Location": target.prefix.rstrip("/") + self.path})
+                return True
+            target = parse_target(self.path, {int(self.server.server_port), self.app.app_server_port})
+            if target.needs_slash:
+                query = urlsplit(self.path).query
+                self._send_bytes(307, b"", "text/plain", {"Location": target.prefix + ("?" + query if query else "")})
+            else:
+                forward(self, target, origin, AUTH_COOKIE_NAME)
+        except AuthenticationRequired:
+            # Keep login on the existing trusted Share page, never the upstream.
+            body = '<!doctype html><meta charset="utf-8"><title>需要项目密码</title><p>请先<a href="/" target="_blank" rel="noopener">打开共享首页登录</a>，登录后刷新此页。</p>'
+            self._send_bytes(401, body.encode("utf-8"), "text/html; charset=utf-8")
+        except AccessDenied as exc:
+            self._error(403, str(exc))
+        except ProxyError as exc:
+            self._error(exc.status, str(exc))
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+        except (OSError, ValueError) as exc:
+            self.app.logger.info("反代请求结束：%s", type(exc).__name__)
+            self._error(502, "反代连接失败或超时")
+        return True
+
+    def _proxy_method(self) -> None:
+        if not self._try_proxy():
+            self.close_connection = True
+            self._error(405, "该路径不支持此方法")
+
+    do_HEAD = _proxy_method
+    do_PUT = _proxy_method
+    do_PATCH = _proxy_method
+    do_DELETE = _proxy_method
+    do_OPTIONS = _proxy_method

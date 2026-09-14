@@ -230,6 +230,8 @@ def run(config_path: str | Path) -> int:
         workspace=config.workspace,
         preview_roots=config.preview_roots,
         password=config.password,
+        public_origin=config.public_origin,
+        app_server_port=config.app_server_port,
         logger=logging.getLogger("lan.web"),
     )
     server = None
@@ -242,6 +244,15 @@ def run(config_path: str | Path) -> int:
                 actual_port = int(server.server_address[1])
                 print("=" * 72)
                 print("局域网共享 Codex 会话已启动")
+                print("动态反代：在分享地址后添加 /proxy/localhost:端口/ 或 /proxy/内网IP:端口/，无需登记服务。")
+                if not config.password:
+                    logging.warning("动态反代未设置项目密码：访问者可操作可达的本机及内网 HTTP 服务；这些操作不受 Codex permission_mode 限制。")
+                if config.public_origin:
+                    print(f"公网分享地址：{config.public_origin}/")
+                    if config.password:
+                        print("公网访问保护：项目密码登录")
+                    else:
+                        logging.warning("公网入口未设置项目密码：任何访问者均可查看会话、读取授权文件、发送任务，并按 %s 权限操作本机。请尽快设置 password 后重启。", config.permission_mode)
                 for url in _share_urls(addresses, actual_port):
                     print(f"分享地址：{url}")
                 print(f"共享模式：{'全部 Session（项目分组）' if config.discover_all_sessions else '固定/自动 Session'}")
@@ -255,12 +266,13 @@ def run(config_path: str | Path) -> int:
                 print(f"本机 CLI：{cli_command}（连接 127.0.0.1:{config.app_server_port}）")
                 print(f"工作目录：{config.workspace}")
                 print(f"权限：{config.permission_mode} / approval never")
+                visitors = "项目密码登录后的访问者" if config.password else "任何访问者（无需登录）"
                 if config.permission_mode == "danger-full-access":
-                    print("警告：局域网内无需登录，任何访问者都可以修改本机项目和工作区外文件。")
+                    print(f"警告：{visitors}可以修改本机项目和工作区外文件。")
                 elif config.permission_mode == "workspace-write":
-                    print("警告：局域网内无需登录，任何访问者都可以修改工作区文件。")
+                    print(f"警告：{visitors}可以修改工作区文件。")
                 else:
-                    print("提示：局域网内无需登录，任何访问者都可以读取授权范围内的文件。")
+                    print(f"提示：{visitors}可以读取授权范围内的文件。")
                 print("若其他设备无法连接，请检查操作系统防火墙，并允许 Python/Codex 访问局域网。")
                 print("按 Ctrl+C 停止服务。")
                 print("=" * 72)

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import tomllib
 
+from .lan_access import normalize_public_origin
+
 
 class LanConfigError(ValueError):
     pass
@@ -26,6 +28,7 @@ class LanConfig:
     session_ids: tuple[str, ...] | None = None
     permission_mode: str = "danger-full-access"
     password: str = ""
+    public_origin: str = ""
 
     @property
     def session_id(self) -> str | None:
@@ -108,6 +111,10 @@ def load_lan_config(path: str | Path) -> LanConfig:
     password = data.get("password", "")
     if not isinstance(password, str):
         raise LanConfigError("password 必须是字符串")
+    try:
+        public_origin = normalize_public_origin(data.get("public_origin", ""))
+    except ValueError as exc:
+        raise LanConfigError(str(exc)) from exc
     preview_roots_raw = data.get("preview_roots", [])
     if not isinstance(preview_roots_raw, list) or not all(isinstance(item, str) for item in preview_roots_raw):
         raise LanConfigError("preview_roots 必须是路径字符串数组")
@@ -135,4 +142,5 @@ def load_lan_config(path: str | Path) -> LanConfig:
         session_ids=session_ids,
         permission_mode=permission_mode,
         password=password,
+        public_origin=public_origin,
     )

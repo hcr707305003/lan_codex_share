@@ -1,11 +1,42 @@
 from __future__ import annotations
 
 from ipaddress import ip_address, ip_network
+import re
 from urllib.parse import urlsplit
 
 
 class AccessDenied(ValueError):
     pass
+
+
+def normalize_public_origin(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("public_origin 必须是 HTTPS 地址字符串")
+    value = value.strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname or ""
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("public_origin 地址无效") from exc
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or len(hostname) > 253
+        or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", part) for part in hostname.split("."))
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query or parsed.fragment
+        or any(char.isspace() for char in value)
+        or "?" in value or "#" in value or "\\" in value
+        or parsed.netloc.endswith(":")
+        or port == 0
+    ):
+        raise ValueError("public_origin 必须是完整 HTTPS 域名地址，不能带路径、查询参数或凭据")
+    return f"https://{hostname}" + (f":{port}" if port not in {None, 443} else "")
 
 
 PRIVATE_V4 = (
@@ -39,6 +70,20 @@ def validate_host(host: str, allowed_hosts: set[str]) -> None:
         raise AccessDenied("Host 不允许")
 
 
+def request_origin(host: str, allowed_hosts: set[str], public_origin: str = "") -> str:
+    if public_origin:
+        public = urlsplit(public_origin)
+        if host_name(host) == public.hostname:
+            authorities = {public.netloc}
+            if public.port is None:
+                authorities.add(f"{public.hostname}:443")
+            if host.lower() not in authorities:
+                raise AccessDenied("公网 Host 端口不允许")
+            return public_origin
+    validate_host(host, allowed_hosts)
+    return f"http://{host}"
+
+
 def validate_mutating_request(
     *,
     host: str,
@@ -47,9 +92,10 @@ def validate_mutating_request(
     csrf: str,
     expected_csrf: str,
     allowed_hosts: set[str],
+    public_origin: str = "",
 ) -> None:
-    validate_host(host, allowed_hosts)
-    if origin.rstrip("/") != f"http://{host}".rstrip("/"):
+    expected_origin = request_origin(host, allowed_hosts, public_origin)
+    if origin.rstrip("/") != expected_origin.rstrip("/"):
         raise AccessDenied("Origin 不允许")
     if content_type.split(";", 1)[0].strip().lower() != "application/json":
         raise AccessDenied("Content-Type 必须是 application/json")

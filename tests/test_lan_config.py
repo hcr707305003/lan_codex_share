@@ -31,6 +31,36 @@ def test_load_lan_config_defaults(tmp_path):
     assert config.session_id is None
     assert config.permission_mode == "danger-full-access"
     assert config.password == ""
+    assert config.public_origin == ""
+
+
+def test_loads_public_origin(tmp_path):
+    path = tmp_path / "lan_config.toml"
+    write_config(path, tmp_path, 'password = "team secret"\npublic_origin = "https://Codex.Example.com:443/"\n')
+    assert load_lan_config(path).public_origin == "https://codex.example.com"
+
+
+@pytest.mark.parametrize("password", ["", "   "])
+def test_public_origin_preserves_optional_password(tmp_path, password):
+    path = tmp_path / "lan_config.toml"
+    write_config(path, tmp_path, f'password = "{password}"\npublic_origin = "https://codex.example.com"\n')
+    assert load_lan_config(path).password == password
+
+
+@pytest.mark.parametrize("origin", [
+    '123', '"http://codex.example.com"', '"https://"',
+    '"https://user:secret@example.com"', '"https://example.com/path"',
+    '"https://example.com?session=x"', '"https://example.com#fragment"',
+    '"https://*.example.com"', '"https://example.com:0"',
+    '"https://example.com:65536"', '"https://example.com:"',
+    '"https://example.com?"', '"https://example.com/#"',
+    '"https://example.com@evil.example"', '"https://exa mple.com"',
+])
+def test_rejects_invalid_public_origins(tmp_path, origin):
+    path = tmp_path / "lan_config.toml"
+    write_config(path, tmp_path, f'password = "team secret"\npublic_origin = {origin}\n')
+    with pytest.raises(LanConfigError, match="public_origin"):
+        load_lan_config(path)
 
 
 def test_loads_session_and_permission_mode(tmp_path):

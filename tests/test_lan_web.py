@@ -100,7 +100,7 @@ class FakeService:
         self.subscribers.discard(subscriber)
 
 
-def start_app(tmp_path, *, password=""):
+def start_app(tmp_path, *, password="", public_origin=""):
     service = FakeService()
     images = ImageStore(tmp_path / "uploads", max_bytes=1024 * 1024, max_images=4)
     app = LanWebApplication(
@@ -110,6 +110,7 @@ def start_app(tmp_path, *, password=""):
         max_request_bytes=2 * 1024 * 1024,
         workspace=tmp_path,
         password=password,
+        public_origin=public_origin,
     )
     server = app.create_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -169,6 +170,17 @@ def test_server_logs_expected_client_disconnect_without_traceback(tmp_path, monk
             if isinstance(error, ConnectionAbortedError)
             else "客户端 192.168.1.240:3864 已断开连接"
         )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+
+
+def test_server_accept_backlog_handles_tunnel_resource_bursts(tmp_path):
+    _, _, server, thread = start_app(tmp_path)
+    try:
+        # Vite imports trigger many simultaneous Tunnel-to-origin connections.
+        assert server.request_queue_size >= 128
     finally:
         server.shutdown()
         server.server_close()

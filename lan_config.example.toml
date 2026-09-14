@@ -5,6 +5,10 @@ session_ids = []
 permission_mode = "danger-full-access"
 # 留空时不需要密码；设置非空字符串后，访问网页必须先登录。
 password = ""
+# 可选公网入口，留空保持仅局域网模式。Tunnel 在同一台电脑运行，回源本机 Web 端口。
+# 示例：public_origin = "https://codex.example.com"
+# 公网密码留空会完全免登录，所有访问者均可在配置权限内操作本机；强烈建议设置密码。
+public_origin = ""
 host = "0.0.0.0"
 port = 8765
 app_server_port = 4500
