@@ -207,7 +207,7 @@ def test_chunked_upload_and_request_limits(proxy):
 
 def test_cookie_scoping_and_share_credentials_are_not_forwarded(proxy):
     app, server, upstream, prefix = proxy
-    headers = {"Cookie": f"lan_codex_auth={app.auth_token}; sid=upstream; cf_clearance=private", "X-CSRF-Token": app.csrf_token}
+    headers = {"Cookie": "lan_codex_auth=share-credential; sid=upstream; cf_clearance=private", "X-CSRF-Token": app.csrf_token}
     status, response_headers, _ = request(server, "GET", prefix + "/cookies", headers=headers)
     assert status == 200
     sent_headers = upstream.seen[-1][2]
@@ -222,7 +222,6 @@ def test_cookie_scoping_and_share_credentials_are_not_forwarded(proxy):
 def test_password_covers_proxy_and_client_script(proxy):
     app, server, upstream, prefix = proxy
     app.password = "test secret"
-    app.auth_token = "test-token"
     assert request(server, "GET", prefix + "/page")[0] == 401
     assert request(server, "GET", "/proxy-client.js")[0] == 401
     assert not upstream.seen
@@ -365,7 +364,6 @@ def test_cross_port_redirects_and_authentication(proxy):
             assert request(server, "GET", dict(headers)["Location"])[0] == 200
             assert backend.seen[-1][1] == "/data?q=1"
         app.password = "test secret"
-        app.auth_token = "test-token"
         previous = len(backend.seen)
         assert request(server, "GET", other + "data?q=1")[0] == 401
         assert len(backend.seen) == previous

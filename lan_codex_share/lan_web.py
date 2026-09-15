@@ -20,6 +20,9 @@ from .lan_access import AccessDenied, is_lan_client, normalize_public_origin, re
 from .lan_store import ImageStore, ImageValidationError
 from .workspace_files import WorkspaceFileError, WorkspaceFilePreview, WorkspaceFileViewer
 from .dynamic_proxy import ProxyError, check_browser_origin, forward, parse_target
+from .static_assets import StaticAssets
+from .stream_delta import SnapshotDelta
+from .auth_tokens import AuthTokens, LOGIN_MAX_AGE
 
 
 AUTH_COOKIE_NAME = "lan_codex_auth"
@@ -60,6 +63,7 @@ class LanWebApplication:
         workspace: str | Path | None = None,
         preview_roots: tuple[Path, ...] = (),
         password: str = "",
+        auth_state_path: Path | None = None,
         public_origin: str = "",
         app_server_port: int = 4500,
         logger: logging.Logger | None = None,
@@ -72,14 +76,15 @@ class LanWebApplication:
         self.password = password
         self.public_origin = normalize_public_origin(public_origin)
         self.app_server_port = app_server_port
-        self.auth_token = secrets.token_urlsafe(32) if password else ""
+        self.auth_tokens = AuthTokens(password, auth_state_path)
         self.login_failures: dict[str, list[float]] = {}
         self.auth_lock = threading.Lock()
         self.logger = logger or logging.getLogger(__name__)
         self.web_root = Path(__file__).with_name("web")
-        missing_assets = [name for name in ("index.html", "app.js", "history.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
+        missing_assets = [name for name in ("index.html", "app.js", "history.js", "realtime.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
         if missing_assets:
             raise FileNotFoundError(f"Web 静态资源不完整：{', '.join(missing_assets)}")
+        self.static_assets = StaticAssets(self.web_root)
         self.file_viewer = WorkspaceFileViewer(workspace or Path.cwd(), preview_roots=preview_roots)
 
     @property
@@ -95,7 +100,7 @@ class LanWebApplication:
         except CookieError:
             return False
         morsel = cookie.get(AUTH_COOKIE_NAME)
-        return morsel is not None and hmac.compare_digest(morsel.value, self.auth_token)
+        return morsel is not None and self.auth_tokens.verify(morsel.value)
 
     def authenticate(self, password: str, source_ip: str) -> str:
         if not self.password_required:
@@ -112,7 +117,7 @@ class LanWebApplication:
                 raise LoginRateLimited("密码尝试过多，请稍后再试")
             if hmac.compare_digest(password.encode("utf-8"), self.password.encode("utf-8")):
                 self.login_failures.pop(source_ip, None)
-                return self.auth_token
+                return self.auth_tokens.issue()
             failures.append(now)
             self.login_failures[source_ip] = failures
         raise AuthenticationRequired("密码错误")
@@ -137,19 +142,19 @@ class LanRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format_string: str, *args: Any) -> None:
         self.app.logger.info("HTTP %s %s", self.client_address[0], format_string % args)
 
-    def _security_headers(self) -> None:
+    def _security_headers(self, cache_control: str = "no-store") -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache_control)
 
-    def _send_bytes(self, status: int, body: bytes, content_type: str, headers: dict[str, str] | None = None) -> None:
+    def _send_bytes(self, status: int, body: bytes, content_type: str, headers: dict[str, str] | None = None, *, cache_control: str = "no-store") -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         for name, value in (headers or {}).items():
             self.send_header(name, value)
-        self._security_headers()
+        self._security_headers(cache_control)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -199,6 +204,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             if path == "/":
                 page = (self.app.web_root / "index.html").read_text(encoding="utf-8")
                 page = page.replace("__CSRF_TOKEN__", self.app.csrf_token)
+                for name in self.app.static_assets.names:
+                    page = page.replace(f'"/{name}"', f'"{self.app.static_assets.url(name)}"')
                 body = page.encode("utf-8")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -211,7 +218,22 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if path in {"/app.js", "/history.js"}:
+            if path.startswith("/assets/"):
+                asset = self.app.static_assets.get(path)
+                if asset is None:
+                    self._error(404, "静态资源版本不存在，请刷新页面")
+                    return
+                cache = "public, max-age=31536000, immutable"
+                etags = [part.strip().removeprefix("W/") for part in self.headers.get("If-None-Match", "").split(",")]
+                if asset.etag in etags or "*" in etags:
+                    self.send_response(304)
+                    self.send_header("ETag", asset.etag)
+                    self._security_headers(cache)
+                    self.end_headers()
+                else:
+                    self._send_bytes(200, asset.body, asset.mime, {"ETag": asset.etag}, cache_control=cache)
+                return
+            if path in {"/app.js", "/history.js", "/realtime.js"}:
                 self._serve_asset(path[1:], "text/javascript; charset=utf-8")
                 return
             if path == "/style.css":
@@ -224,6 +246,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                         "required": self.app.password_required,
                         "authenticated": self.app.is_authenticated(self.headers.get("Cookie", "")),
                     },
+                    {"X-CSRF-Token": self.app.csrf_token},
                 )
                 return
             self._require_authentication()
@@ -248,7 +271,11 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 ))
                 return
             if path == "/api/events":
-                self._serve_events()
+                query = parse_qs(request_url.query, keep_blank_values=True)
+                if query.get("mode", [""])[0] == "delta":
+                    self._serve_delta_events(query.get("session_id", [None])[0])
+                else:
+                    self._serve_events()
                 return
             if path.startswith("/api/images/"):
                 self._serve_image(path.rsplit("/", 1)[-1])
@@ -319,6 +346,63 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             self.app.file_viewer.set_dynamic_roots(self.app.service.preview_roots)
         return self.app.file_viewer.open(raw_path)
 
+    def _serve_delta_events(self, session_id: str | None) -> None:
+        subscriber = self.app.service.subscribe()
+        started = False
+        try:
+            # Validate selection and prepare a bounded baseline before sending
+            # streaming headers. Subscribe first so no changes are lost here.
+            first = self.app.service.snapshot(session_id, history_limit=20)
+            selected = first.get("selected_session_id") or first.get("thread_id") or session_id
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self._security_headers("no-store, no-transform")
+            self.end_headers()
+            started = True
+            self.connection.settimeout(30)
+            stream = SnapshotDelta()
+
+            def send(frame):
+                if frame is not None:
+                    data = json.dumps(frame['data'], ensure_ascii=False, separators=(',', ':'))
+                    self.wfile.write(f"event: {frame['event']}\ndata: {data}\n\n".encode('utf-8'))
+                    self.wfile.flush()
+
+            send(stream.next(first))
+            last_sent = time.monotonic()
+            while not self.server.stopping.is_set():
+                try:
+                    subscriber.get(timeout=15)
+                except queue.Empty:
+                    if not self.app.is_authenticated(self.headers.get("Cookie", "")):
+                        break
+                    self.wfile.write(b": heartbeat\n\n")
+                    self.wfile.flush()
+                    continue
+                if self.server.stopping.wait(max(0, 0.15 - (time.monotonic() - last_sent))):
+                    break
+                while True:
+                    try:
+                        subscriber.get_nowait()
+                    except queue.Empty:
+                        break
+                if not self.app.is_authenticated(self.headers.get("Cookie", "")):
+                    break
+                send(stream.next(self.app.service.snapshot(selected, history_limit=20)))
+                last_sent = time.monotonic()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        except Exception:
+            if not started:
+                raise
+            self.app.logger.exception("实时增量流中断")
+            # Do not append an HTTP error response inside an SSE body.
+        finally:
+            self.close_connection = True
+            self.app.service.unsubscribe(subscriber)
+
     def _serve_events(self) -> None:
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -336,11 +420,14 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                     payload = f"event: update\ndata: {version}\n\n".encode("utf-8")
                 except queue.Empty:
                     payload = b": heartbeat\n\n"
+                if not self.app.is_authenticated(self.headers.get("Cookie", "")):
+                    break
                 self.wfile.write(payload)
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
         finally:
+            self.close_connection = True
             self.app.service.unsubscribe(subscriber)
 
     def do_POST(self) -> None:
@@ -372,7 +459,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                     origin = request_origin(self.headers.get("Host", ""), self.app.allowed_hosts, self.app.public_origin)
                     secure = "; Secure" if origin.startswith("https://") else ""
                     headers = {
-                        "Set-Cookie": f"{AUTH_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict{secure}"
+                        "Set-Cookie": f"{AUTH_COOKIE_NAME}={token}; Path=/; Max-Age={LOGIN_MAX_AGE}; HttpOnly; SameSite=Strict{secure}"
                     }
                 self._json(HTTPStatus.OK, {"authenticated": True}, headers)
                 return
@@ -496,6 +583,9 @@ class LanRequestHandler(BaseHTTPRequestHandler):
         return True
 
     def _proxy_method(self) -> None:
+        if self.command == "HEAD" and urlsplit(self.path).path.startswith("/assets/"):
+            self.do_GET()
+            return
         if not self._try_proxy():
             self.close_connection = True
             self._error(405, "该路径不支持此方法")

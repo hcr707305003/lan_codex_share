@@ -100,7 +100,7 @@ class FakeService:
         self.subscribers.discard(subscriber)
 
 
-def start_app(tmp_path, *, password="", public_origin=""):
+def start_app(tmp_path, *, password="", public_origin="", auth_state_path=None):
     service = FakeService()
     images = ImageStore(tmp_path / "uploads", max_bytes=1024 * 1024, max_images=4)
     app = LanWebApplication(
@@ -110,6 +110,7 @@ def start_app(tmp_path, *, password="", public_origin=""):
         max_request_bytes=2 * 1024 * 1024,
         workspace=tmp_path,
         password=password,
+        auth_state_path=auth_state_path,
         public_origin=public_origin,
     )
     server = app.create_server("127.0.0.1", 0)
@@ -307,7 +308,8 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b"bootstrapAuthentication()" in script
         assert b"function startEvents()" in script
         assert b"let events = null" in script
-        assert b"new EventSource('/api/events')" in script
+        assert b"new EventSource(`/api/events?${query}`)" in script
+        assert b"mode: 'delta'" in script
         assert b"const events = new EventSource" not in script
 
         status, _, auth_status = request(server, "GET", "/api/auth/status")
@@ -333,7 +335,7 @@ def test_page_snapshot_and_message_post(tmp_path):
         thread.join(2)
 
 
-def test_password_authentication_protects_data_routes_and_uses_session_cookie(tmp_path):
+def test_password_authentication_protects_data_routes_and_uses_persistent_cookie(tmp_path):
     app, service, server, thread = start_app(tmp_path, password="team secret")
     markdown = tmp_path / "protected.md"
     markdown.write_text("# Protected", encoding="utf-8")
@@ -373,7 +375,7 @@ def test_password_authentication_protects_data_routes_and_uses_session_cookie(tm
         assert "HttpOnly" in set_cookie
         assert "SameSite=Strict" in set_cookie
         assert "Expires=" not in set_cookie
-        assert "Max-Age=" not in set_cookie
+        assert "Max-Age=2592000" in set_cookie
         cookie = set_cookie.split(";", 1)[0]
 
         status, _, body = request(server, "GET", "/api/auth/status", headers={"Cookie": cookie})
@@ -403,6 +405,72 @@ def test_password_authentication_protects_data_routes_and_uses_session_cookie(tm
         assert request(server, "POST", "/api/messages", payload, headers)[0] == 202
         assert service.submitted == [("thread-web", "allowed", [], "127.0.0.1")]
     finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+
+
+def test_login_survives_server_restart_and_password_change_revokes(tmp_path, monkeypatch):
+    now = [1800000000]
+    monkeypatch.setattr('lan_codex_share.auth_tokens.time.time', lambda: now[0])
+    state = tmp_path / 'runtime' / 'auth.json'
+    app, _, server, thread = start_app(tmp_path, password='secret', auth_state_path=state)
+    try:
+        _, headers, _ = login(server, app.csrf_token, 'secret')
+        cookie = dict(headers)['Set-Cookie'].split(';', 1)[0]
+        old_csrf = app.csrf_token
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+    for password, expected in [('secret', True), ('changed', False), ('secret', False)]:
+        app, service, server, thread = start_app(tmp_path, password=password, auth_state_path=state)
+        try:
+            status, headers, body = request(server, 'GET', '/api/auth/status', headers={'Cookie': cookie})
+            assert status == 200
+            assert json.loads(body)['authenticated'] is expected
+            current_csrf = dict(headers)['X-CSRF-Token']
+            assert current_csrf == app.csrf_token != old_csrf
+            assert dict(headers)['Cache-Control'] == 'no-store'
+            assert request(server, 'GET', '/api/snapshot', headers={'Cookie': cookie})[0] == (200 if expected else 401)
+            if expected:
+                headers = {**mutation_headers(server, current_csrf), 'Cookie': cookie}
+                assert request(server, 'POST', '/api/messages', b'{"text":"after restart"}', headers)[0] == 202
+                now[0] += 2592000
+                assert request(server, 'GET', '/api/snapshot', headers={'Cookie': cookie})[0] == 401
+                now[0] -= 2592000
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+
+
+@pytest.mark.parametrize('route', ['/api/events', '/api/events?mode=delta'])
+def test_expired_login_closes_existing_event_stream(tmp_path, monkeypatch, route):
+    now = [1800000000]
+    monkeypatch.setattr('lan_codex_share.auth_tokens.time.time', lambda: now[0])
+    app, service, server, thread = start_app(tmp_path, password='secret')
+    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
+    try:
+        token = app.authenticate('secret', 'test')
+        connection.request('GET', route, headers={'Cookie': f'lan_codex_auth={token}'})
+        response = connection.getresponse()
+        assert response.status == 200
+        while response.fp.readline().strip():
+            pass
+        now[0] += 2592000
+        # Wake the idle connection after expiry; it must close without another private event.
+        import time
+        deadline = time.monotonic() + 2
+        while not service.subscribers and time.monotonic() < deadline:
+            threading.Event().wait(0.01)
+        assert service.subscribers
+        for subscriber in tuple(service.subscribers):
+            subscriber.put(2)
+        assert response.fp.readline() == b''
+    finally:
+        connection.close()
+        server.stopping.set()
         server.shutdown()
         server.server_close()
         thread.join(2)

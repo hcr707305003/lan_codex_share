@@ -222,22 +222,23 @@ def run(config_path: str | Path) -> int:
     )
     hub = _build_session_hub(config, runtime, image_store)
     request_limit = config.max_images * ((config.max_image_bytes + 2) // 3 * 4) + 1024 * 1024
-    app = LanWebApplication(
-        hub,
-        image_store,
-        allowed_hosts,
-        max_request_bytes=request_limit,
-        workspace=config.workspace,
-        preview_roots=config.preview_roots,
-        password=config.password,
-        public_origin=config.public_origin,
-        app_server_port=config.app_server_port,
-        logger=logging.getLogger("lan.web"),
-    )
     server = None
     try:
         with SingleInstanceLock(runtime / "server.lock"):
             try:
+                app = LanWebApplication(
+                    hub,
+                    image_store,
+                    allowed_hosts,
+                    max_request_bytes=request_limit,
+                    workspace=config.workspace,
+                    preview_roots=config.preview_roots,
+                    password=config.password,
+                    auth_state_path=runtime / "auth.json",
+                    public_origin=config.public_origin,
+                    app_server_port=config.app_server_port,
+                    logger=logging.getLogger("lan.web"),
+                )
                 app_server.start()
                 hub.start()
                 server = app.create_server(config.host, config.port)

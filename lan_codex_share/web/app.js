@@ -1,6 +1,6 @@
 'use strict';
 
-const csrf = document.querySelector('meta[name="csrf-token"]').content;
+let csrf = document.querySelector('meta[name="csrf-token"]').content;
 const authGate = document.getElementById('auth-gate');
 const authForm = document.getElementById('auth-form');
 const authPassword = document.getElementById('auth-password');
@@ -80,6 +80,8 @@ let previewReturnFocus = null;
 let previewRequestId = 0;
 let lightboxReturnFocus = null;
 let events = null;
+let deltaStreamReady = false;
+let streamRevision = 0;
 let appAuthenticated = false;
 const manuallyExpanded = new Set();
 const manuallyCollapsed = new Set();
@@ -179,6 +181,7 @@ function showAuthentication(message = '', isError = false) {
   historyTimeline.reset();
   latestSnapshot = null; lastVersion = -1;
   if (events) { events.close(); events = null; }
+  deltaStreamReady = false;
   appShell.inert = true;
   appShell.setAttribute('aria-hidden', 'true');
   authGate.hidden = false;
@@ -207,6 +210,8 @@ async function authenticationStatus() {
   let result = {};
   try { result = await response.json(); } catch (_) { /* use generic error */ }
   if (!response.ok) throw new Error(result.error || '无法检查登录状态');
+  const currentCsrf = response.headers.get('X-CSRF-Token');
+  if (currentCsrf) csrf = currentCsrf;
   return result;
 }
 
@@ -1201,13 +1206,15 @@ function renderModelControls(snapshot, processing, queueSize) {
 
 async function refresh() {
   if (!appAuthenticated) return;
+  if (deltaStreamReady) return;
   if (refreshing) { refreshQueued = true; return; }
   refreshing = true;
   const generation = selectionGeneration;
+  const revision = streamRevision;
   refreshController = new AbortController();
   try {
     const snapshot = await fetchHistoryPage(null, refreshController.signal);
-    if (generation === selectionGeneration) render(snapshot);
+    if (generation === selectionGeneration && revision === streamRevision) render(snapshot);
   } catch (error) {
     if (error.name !== 'AbortError') throw error;
   } finally {
@@ -1259,17 +1266,49 @@ async function mutateForSession(path, sessionId, payload = {}) {
 
 function startEvents() {
   if (events) return;
-  events = new EventSource('/api/events');
-  events.addEventListener('update', scheduleRefresh);
-  events.onopen = () => { if (!latestSnapshot?.last_error) setNotice('已连接真实 Codex Session。'); };
-  events.onerror = async () => {
+  const query = new URLSearchParams({mode: 'delta'});
+  if (selectedSessionId) query.set('session_id', selectedSessionId);
+  const source = new EventSource(`/api/events?${query}`);
+  const state = new StreamSnapshot();
+  const generation = selectionGeneration;
+  const current = () => events === source && generation === selectionGeneration;
+  events = source;
+  deltaStreamReady = false;
+  for (const event of ['snapshot', 'delta']) source.addEventListener(event, message => {
+    if (!current()) return;
+    try {
+      const snapshot = state.apply(event, JSON.parse(message.data));
+      deltaStreamReady = true;
+      streamRevision += 1;
+      // Avoid retaining old-version UI after a new baseline on reconnection.
+      if (event === 'snapshot') lastVersion = -1;
+      render(snapshot);
+    } catch (_) {
+      source.close(); events = null; deltaStreamReady = false;
+      setNotice('实时数据正在重新同步…');
+      setTimeout(() => { if (generation === selectionGeneration && appAuthenticated) startEvents(); }, 500);
+    }
+  });
+  // Backward compatible with servers exposing only update notifications.
+  source.addEventListener('update', () => { if (current()) { deltaStreamReady = false; scheduleRefresh(); } });
+  source.onopen = async () => {
+    if (!current()) return;
+    try { await authenticationStatus(); } catch (_) { /* retry on connection error */ }
+    if (current() && !latestSnapshot?.last_error) setNotice('已连接真实 Codex Session。');
+  };
+  source.onerror = async () => {
+    if (!current()) return;
+    deltaStreamReady = false;
     try {
       const status = await authenticationStatus();
+      if (!current()) return;
       if (status.required && !status.authenticated) {
         showAuthentication('登录状态已失效，请重新输入密码。', true);
         return;
       }
     } catch (_) { /* keep EventSource retry behavior */ }
+    if (!current()) return;
+    scheduleRefresh();
     setNotice('实时连接暂时断开，浏览器正在重连…', true);
   };
 }
@@ -1279,7 +1318,6 @@ async function startAuthenticatedApp() {
   appAuthenticated = true;
   hideAuthentication();
   startEvents();
-  await refresh();
 }
 
 async function bootstrapAuthentication() {
@@ -1413,7 +1451,9 @@ function selectSession(next) {
   url.searchParams.set('session', next);
   window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   setNotice(`正在切换到 ${shortId(next)}…`);
-  refresh().catch(error => setNotice(error.message, true));
+  if (events) { events.close(); events = null; }
+  deltaStreamReady = false;
+  startEvents();
 }
 
 sessionSelect.addEventListener('change', () => selectSession(sessionSelect.value));

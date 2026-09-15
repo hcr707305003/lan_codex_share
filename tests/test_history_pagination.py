@@ -116,7 +116,7 @@ def test_http_pagination_uses_existing_auth_and_session_boundary(history_server)
     from tests.test_lan_web import request
 
     app, hub, server = history_server
-    headers = {'Cookie': f'lan_codex_auth={app.auth_token}'}
+    headers = {'Cookie': f'lan_codex_auth={app.authenticate(app.password, "test")}'}
     assert request(server, 'GET', '/api/snapshot')[0] == 401
     assert request(server, 'GET', '/api/history/activities?turn_id=t-99')[0] == 401
     assert request(server, 'GET', '/history.js')[0] == 200

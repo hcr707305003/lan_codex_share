@@ -4,7 +4,7 @@
 
 同一个 Web 端口还可动态反代本机和局域网 HTTP 服务，无需为每个服务添加子域名或配置条目。
 
-[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.1.7 更新说明](docs/releases/v0.1.7.md)
+[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.1.8 更新说明](docs/releases/v0.1.8.md)
 
 **公网部署请设置项目密码，并且只代理可信服务。无密码不是只读：访问者可以发送 Codex 任务、读取授权文件并操作可达的内网服务。**
 
@@ -101,6 +101,14 @@ python -m lan_codex_share cli --config=lan_config.toml --session <Session ID>
 
 此优化减少浏览器传输和渲染量，但共享服务首次恢复 Session 仍会读取完整记录，单条极长回复也仍有渲染成本。源码更新后需要重启共享程序并刷新浏览器；重新同步历史导致旧分页游标失效时，刷新页面后可重新翻页。
 
+### 公网加载与缓存
+
+- 首页始终 `no-store`，引用带内容哈希的 JS/CSS 地址。仅前端应用代码和样式允许浏览器/CDN 长期公共缓存；文件内容变化后自动生成新地址，不会把新内容放到旧指纹地址下。资源提供 ETag，浏览器再次打开页面可复用未变化的文件。Cloudflare 是否命中缓存还取决于节点及已有缓存规则。
+- 已经打开的页面不会被强制刷新；更新程序后刷新页面即可加载新版静态资源。服务端代码更新仍需要在任务空闲时重启共享程序。
+- 新版实时连接直接发送最近 20 轮基线，后续只推送变化字段、消息及文字追加，不再每收到一次通知就额外 GET 快照。断线重连发送新的基线，避免文字重复追加；旧版通知模式仍兼容。主动上滑、展开过程等操作仍按需请求对应数据。
+- 首页、登录、会话、图片、文件、下载和反代内容不纳入公共静态缓存。不要给整个域名设置“缓存所有内容”；尤其不能缓存带 CSRF Token 的首页或私有接口。实时流使用 `no-store, no-transform`，避免中间层缓存或转换影响推送。
+- 这些优化减少重复下载及往返，不消除公网网络、TLS、Tunnel 链路或上游模型自身延迟。
+
 回复中的本地文件 Markdown 链接可以点击，并在会话右侧预览。Markdown 会格式化显示，常见源码和文本提供行号；`文件路径:行号:列号` 会自动定位并高亮。图片和 PDF 也可内嵌查看。只允许读取 `workspace` 和 `preview_roots` 显式授权的目录。
 
 共享服务和本机 CLI 启动器都连接 `127.0.0.1:app_server_port` 上的同一个 App Server，因此可以同时查看和操作 Session，不会争抢会话文件锁。若该端口已经由兼容的 Codex App Server 占用，启动器会直接复用。Windows 可以双击 `open_lan_codex_cli.cmd`；macOS/Linux 运行 `./open_lan_codex_cli.sh`。多会话配置默认打开第一项，也可以指定 Session：
@@ -141,7 +149,9 @@ preview_roots = [
 - `permission_mode = "read-only"`：只读访问。
 - `permission_mode = "workspace-write"`：允许修改工作区。
 - `permission_mode = "danger-full-access"`：完全访问本机文件系统。
-- `password = ""`：不启用登录；设置非空字符串后，浏览器需要先输入该密码。登录状态只保留到浏览器关闭或桥接器重启，真实密码只应写入已忽略的 `lan_config.toml`。
+- `password = ""`：不启用登录；设置非空字符串后，浏览器需要先输入该密码。登录凭证从登录起固定有效 **30 天**（不会因访问自动延期），期间重启共享程序或关闭浏览器无需再次输入密码。浏览器禁用/清除 Cookie、无痕窗口关闭或切换访问域名时仍需登录。真实密码只应写入已忽略的 `lan_config.toml`。
+- 登录签名密钥保存在配置文件旁的 `runtime/lan/auth.json`，升级时需保留该文件及其所在目录；它属于敏感运行数据，不要提交或分享。首次从旧版升级需重新登录一次。修改密码并重启后旧凭证失效；以空密码启动后再次开启密码也会使旧登录失效。需要主动撤销全部登录时，可停止共享程序、删除该文件后重新启动；不要恢复旧密钥备份来撤销登录。文件损坏、不可读或密钥无法写入时拒绝启动，不会退化为免登录。
+- Cookie 使用 `HttpOnly`、`SameSite=Strict`，公网 HTTPS 入口附加 `Secure`。局域网 HTTP 登录不加 `Secure`，凭证没有传输加密，仅适合可信网络；公网请继续使用 HTTPS。浏览器不保存密码明文。
 - `public_origin = ""`：仅启用原有局域网访问；填写完整的 HTTPS 域名地址后，额外接受该公网入口。不支持通配符、路径、查询参数或多个域名。
 
 网页目前没有交互式审批弹窗，因此审批策略固定为 `never`；实际访问范围由 `permission_mode` 限制。本机 CLI 会连接所选 Session，并采用相同权限模式。
