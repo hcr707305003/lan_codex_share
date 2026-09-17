@@ -15,7 +15,7 @@
 
 标签流水线依次执行：
 
-1. 在 Python 3.11 环境安装开发依赖并运行全部测试。
+1. 在 Python 3.12 环境安装开发依赖并运行全部测试。
 2. 验证 Git 标签、程序版本和 `docs/releases/vX.Y.Z.md` 一致。
 3. 分别构建 Windows x64、Linux x64、Linux ARM64、macOS Intel 和 macOS Apple Silicon 可执行文件。
 4. 对可执行文件运行 `--version`、`--help` 和 `cli --help` 冒烟测试。

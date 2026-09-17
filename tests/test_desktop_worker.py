@@ -23,6 +23,7 @@ def test_share_stop_event_closes_loopback_listener(tmp_path, monkeypatch):
     from lan_codex_share.lan_config import LanConfig
 
     stopped = threading.Event()
+    ready = threading.Event()
     flags = []
     class Host:
         _owned_processes = []
@@ -42,13 +43,23 @@ def test_share_stop_event_closes_loopback_listener(tmp_path, monkeypatch):
     hub = SimpleNamespace(thread_ids=[], start=lambda: flags.append('hub-start'), close=lambda: flags.append('hub-close'))
     monkeypatch.setattr(lan_main, 'load_lan_config', lambda p: LanConfig(workspace=tmp_path))
     monkeypatch.setattr(lan_main, '_configure_logging', lambda *a: None)
+    # This test exercises stop/cleanup, not the runner's interfaces or reverse DNS.
+    monkeypatch.setattr(lan_main, 'local_private_addresses', lambda: {'127.0.0.1'})
+    monkeypatch.setattr(lan_main.socket, 'getfqdn', lambda *a: 'localhost')
     monkeypatch.setattr(lan_main.shutil, 'which', lambda name: 'unused-test-command')
     monkeypatch.setattr(lan_main, 'AppServerHost', Host)
     monkeypatch.setattr(lan_main, 'LanWebApplication', Web)
     monkeypatch.setattr(lan_main, '_build_session_hub', lambda *a: hub)
     results = []
-    thread = threading.Thread(target=lambda: results.append(lan_main.run(tmp_path / 'lan.toml', stop_event=stopped, on_ready=stopped.set)), daemon=True)
+    def on_ready():
+        ready.set()
+        stopped.set()
+    thread = threading.Thread(target=lambda: results.append(lan_main.run(tmp_path / 'lan.toml', stop_event=stopped, on_ready=on_ready)), daemon=True)
     thread.start()
+    try:
+        assert ready.wait(10), 'loopback test server did not become ready'
+    finally:
+        stopped.set()
     thread.join(4)
     assert not thread.is_alive(), 'shutdown must not deadlock serve_forever'
     assert results == [0]
