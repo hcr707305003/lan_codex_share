@@ -34,7 +34,7 @@ jobs:
       - run: python -m PyInstaller --version
 
   build:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: test
     strategy:
       fail-fast: false
@@ -69,10 +69,16 @@ jobs:
         run: python -m pytest tests/test_desktop_config.py tests/test_desktop_logs.py tests/test_desktop_process.py tests/test_desktop_worker.py tests/test_desktop_installer.py tests/test_desktop_gui.py tests/test_desktop_launcher.py tests/test_desktop_appearance.py tests/test_desktop_icons.py tests/test_desktop_dialogs.py tests/test_desktop_form_help.py tests/test_desktop_directory_list.py tests/test_desktop_session_list.py tests/test_cloudflare_form_ui.py tests/test_frp_apply_share_port.py -q
       - name: Validate version
         shell: bash
-        run: python scripts/check_version.py "$GITHUB_REF_NAME"
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            tag="$(python -c 'from lan_codex_share import __version__; print("v" + __version__)')"
+          fi
+          python scripts/check_version.py "$tag"
+          echo "PACKAGE_TAG=$tag" >> "$GITHUB_ENV"
       - name: Validate release notes
         shell: bash
-        run: python scripts/check_release_notes.py "$GITHUB_REF_NAME"
+        run: python scripts/check_release_notes.py "$PACKAGE_TAG"
       - name: Build executable
         run: python -m PyInstaller --clean --noconfirm lan_codex_share.spec
       - name: Prepare desktop licenses
@@ -104,7 +110,7 @@ jobs:
           "$executable" cli --help
       - name: Assemble archive
         shell: bash
-        run: python scripts/package_release.py --version "${GITHUB_REF_NAME#v}" --platform "${{ matrix.platform }}" --with-desktop
+        run: python scripts/package_release.py --version "${PACKAGE_TAG#v}" --platform "${{ matrix.platform }}" --with-desktop
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.platform }}

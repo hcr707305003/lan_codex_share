@@ -4,7 +4,7 @@
 
 同一个 Web 端口还可动态反代本机和局域网 HTTP 服务，无需为每个服务添加子域名或配置条目。
 
-[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.2.0 更新说明](docs/releases/v0.2.0.md)
+[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.2.1 更新说明](docs/releases/v0.2.1.md)
 
 **公网部署请设置项目密码，并且只代理可信服务。无密码不是只读：访问者可以发送 Codex 任务、读取授权文件并操作可达的内网服务。**
 
@@ -30,7 +30,7 @@
 
 ## 桌面控制台
 
-无需一直手改配置或切换终端，在本机窗口中管理 Share、frpc 和 Cloudflare Tunnel。**从 v0.2.0 起，五平台版本包同时包含桌面控制台和原有 Share/CLI 程序。**
+无需一直手改配置或切换终端，在本机窗口中管理 Share、frpc 和 Cloudflare Tunnel。**从 v0.2.1 起，五平台版本包同时包含桌面控制台和原有 Share/CLI 程序。**
 
 ![桌面控制台：服务总览](docs/screenshots/desktop-console-overview.png)
 
@@ -50,7 +50,7 @@
 
 版本包解压后，Windows 双击 `lan_codex_desktop.exe`，macOS 打开 `LAN Codex Share.app`，Linux 运行 `./lan_codex_desktop`；均无需安装 Python。命令行可用 `--config=./lan_config.toml` 指定配置，默认读取发行目录中的配置（macOS 在 `.app` 外侧）。
 
-安装独立 CPython 3.11+，在项目目录运行以下命令（桌面平台要求见 [完整说明](DESKTOP.md#发行平台)）。上游 Codex CLI 仍需本机安装并登录。
+源码桌面版推荐独立 CPython 3.12，在项目目录运行以下命令（桌面平台要求见 [完整说明](DESKTOP.md#发行平台)）。上游 Codex CLI 仍需本机安装并登录。
 
 Windows PowerShell：
 
