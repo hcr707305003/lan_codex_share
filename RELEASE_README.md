@@ -1,6 +1,14 @@
 # LAN Codex Share
 
-此版本包包含一个原生可执行程序，不需要安装 Python。目标机器仍需安装并登录 Codex CLI，确认 `codex --version` 可用。
+此版本包保留 Share/CLI 原生程序；包含桌面组件的包还提供 `lan_codex_desktop.exe`（Windows）、`LAN Codex Share.app`（macOS）或 `lan_codex_desktop`（Linux）。不需要安装 Python，但目标机器仍需安装并登录 Codex CLI，确认 `codex --version` 可用。
+
+## 桌面启动
+
+双击桌面程序，或使用 `lan_codex_desktop --config=./lan_config.toml`。默认配置位于发行目录（macOS 在 `.app` 外侧）。窗口启动不会自动启动服务或连接隧道。
+
+服务总览独立控制 Share、frpc 与 Cloudflare；配置管理保存文件但不自动重启。frpc 的 token 填在 `frpc.toml` 的 `auth.token`，Cloudflare 可使用本地 YAML 或单独的 token 文件。缺少 frpc 时，组件管理提供官方校验下载、选择已有程序和官方下载页。
+
+配置、token 文件和日志只留本地，不要分享原始配置截图。日志有脱敏处理，但导出前仍须检查业务内容。关闭窗口时会询问是否停止本窗口启动的服务；不会接管或停止外部服务。
 
 ## 使用
 
@@ -31,11 +39,23 @@ Windows 程序名为 `lan_codex_share.exe`。macOS/Linux 首次解压后如缺�
 
 ## 可选公网入口
 
-配置 `public_origin = "https://codex.example.com"`，让同机运行的 Cloudflare Tunnel 将该域名回源到 `http://localhost:你的Web端口`，保留原始 Host。此模式只接受本机回环代理连接，支持公网 HTTPS 登录、消息发送和事件流，不需要 Cloudflare Access 登录。原局域网 HTTP 入口保持不变。
+配置 `cloudflare_origin = "https://codex.example.com"`，让同机运行的 Cloudflare Tunnel 将该域名回源到 `http://localhost:你的Web端口`，保留原始 Host。此模式只接受本机回环代理连接，支持公网 HTTPS 登录、消息发送和事件流，不需要 Cloudflare Access 登录。原局域网 HTTP 入口保持不变。
 
 强烈建议设置项目 `password`。密码留空仍会完全免登录，并非只读：任何访问者均可查看共享会话、读取授权文件、发送任务，并按配置权限操作本机。程序启动时会警告。修改密码后需重启，旧登录状态随即失效。同一 Tunnel 的访问者共享登录失败限流额度。
 
 ## 动态反代
+
+### 使用已有 frps 的 IP＋端口入口
+
+支持把一个 frp TCP 业务端口转发到本机共享端口：例如 `公网 IP:20000 → 同机 frpc → 127.0.0.1:9000`。共享配置设置 `port = 9000`、`frp_origin = "http://192.0.2.10:20000"` 和非空项目密码；示例 IP 必须替换为实际服务器地址。frpc 中 `localPort = 9000`、`remotePort = 20000`，控制连接端口按 frps 配置填写（例如 7000），与业务端口不同。
+
+随后访问同一入口的 `/` 使用 Codex，访问 `/proxy/localhost:13333/`、`/proxy/localhost:3301/` 使用其他服务，无需新增 frp 映射。frpc 必须在共享程序同机运行并回源回环地址，保留原始 Host、不启用 PROXY protocol。frpc 需要自行安装和手动启动，当前版本包不内置其二进制。
+
+HTTP 公网模式要求非空密码，但浏览器到服务器的流量仍为明文；frp TLS 只保护 frpc/frps 之间的链路。Cookie 不按公网端口隔离，同一 IP 不应承载不可信服务。敏感使用请配置专属 HTTPS 域名。完整示例和启动脚本见 [项目 frp 文档](https://github.com/hcr707305003/lan_codex_share#frp-单端口公网访问)。
+
+`cloudflare_origin` 与 `frp_origin` 可都留空、只设置一个或同时填写；同时启用时两个穿透客户端均回源同一 Web 端口，共用 Session、队列和项目密码，浏览器按域名/IP 分别保存登录。只声明配置不会自动启动穿透客户端。旧 `public_origin` 可单独使用，改用新字段时必须删除旧字段（包括空值），混用会报错。更改入口配置后手动重启，原局域网访问方式不变。
+
+### 多服务路径
 
 直接访问 `https://你的域名/proxy/localhost:1122/` 或 `http://你的内网地址:Web端口/proxy/192.168.1.20:3301/` 即可代理其他 HTTP 服务，不用逐个配置。`localhost` 指共享程序所在电脑；保留现有 Tunnel 回源映射，不需要新子域名。支持常见请求方法、上传下载、SSE 和 WebSocket；不支持任意域名、公网目标、HTTPS-only 回源或任意 TCP 协议。共享端口和 Codex App Server 端口禁止代理。
 

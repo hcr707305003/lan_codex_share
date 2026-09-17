@@ -1,0 +1,16 @@
+# Optional local GUI settings. Copy to desktop_config.toml beside lan_config.toml.
+# Paths are relative to this file unless absolute. Never commit real credentials.
+# Empty executable: discover in app/config directories, their bin trees, then PATH.
+# Multiple candidates require a selection in the GUI. A stale explicit path is not replaced.
+# Programs inside the config directory are saved relatively when selected/downloaded.
+# Local appearance only: graphite (default), forest, midnight, lavender.
+# Changing this in the GUI applies immediately without restarting any service.
+theme = "graphite"
+frpc_executable = ""
+frpc_config = "frpc.toml"
+cloudflared_executable = ""
+cloudflared_config = "cloudflared.yml"
+# yaml or token-file. Configuring an entry does not start a tunnel.
+cloudflared_mode = "yaml"
+# The token stays in this private text file, not in command-line arguments.
+cloudflared_token_file = ""

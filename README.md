@@ -1,18 +1,20 @@
 # 局域网共享 Codex 会话
 
-在 Windows、macOS 或 Linux 本机共享 Codex Session，通过浏览器查看聊天历史和实时任务进度、发送文字与图片，并在配置权限内操作本地工作区。支持固定会话列表或按“项目 → Session”发现全部会话，也可通过同机 Cloudflare Tunnel 提供 HTTPS 公网入口。
+在 Windows、macOS 或 Linux 本机共享 Codex Session，通过浏览器查看聊天历史和实时任务进度、发送文字与图片，并在配置权限内操作本地工作区。支持固定会话列表或按“项目 → Session”发现全部会话，也可通过同机 Cloudflare Tunnel 或 frpc 提供公网入口，单个共享端口支持反代多个服务。
 
 同一个 Web 端口还可动态反代本机和局域网 HTTP 服务，无需为每个服务添加子域名或配置条目。
 
-[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.1.8 更新说明](docs/releases/v0.1.8.md)
+[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.2.0 更新说明](docs/releases/v0.2.0.md)
 
 **公网部署请设置项目密码，并且只代理可信服务。无密码不是只读：访问者可以发送 Codex 任务、读取授权文件并操作可达的内网服务。**
 
 ## 导航
 
+- [桌面控制台](#桌面控制台)：可视化启停、配置、组件管理与日志。
 - [原生版本包](#原生版本包) / [源码安装](#首次安装)
 - [运行与配置](#运行)
 - [Cloudflare Tunnel 公网访问](#cloudflare-tunnel-公网访问)
+- [frp 单端口公网访问](#frp-单端口公网访问)
 - [动态反代与跨端口接口](#动态反代本机及局域网服务)
 - [故障排查](#故障排查) / [升级](#升级)
 
@@ -25,6 +27,50 @@
 网页端提供项目与 Session 导航、实时执行过程、流式回复、模型切换和消息输入，多个局域网访问者可以同步查看同一任务进度。
 
 仓库维护者发布新版本时，请按 [流水线构建与版本发布](PIPELINE_RELEASE.md) 操作；每个 Release 必须详细说明与功能相关的新增、修复、行为变化和升级提示。
+
+## 桌面控制台
+
+无需一直手改配置或切换终端，在本机窗口中管理 Share、frpc 和 Cloudflare Tunnel。**从 v0.2.0 起，五平台版本包同时包含桌面控制台和原有 Share/CLI 程序。**
+
+![桌面控制台：服务总览](docs/screenshots/desktop-console-overview.png)
+
+服务卡片显示状态、端口和可点击的访问入口。三个服务可分别启停，支持 FRP 与 Cloudflare 同时映射一个 Share 端口；打开控制台不会自动启动服务或连接隧道。
+
+- **配置管理**：工作目录和预览目录支持选择文件夹；Session 使用列表管理；可设置权限、项目密码及任务结束提示。TOML/YAML 支持表单与高级文本模式，字段下方提供键名、用途及注意事项，点击“校验并保存”才写入。
+- **隧道配置**：frpc 可设置服务器、Token、公网端口及随机代理名，并通过“应用 Share 端口”更新当前代理的本地端口草稿；Cloudflare 表单提供 Tunnel 名称、凭证文件选择、域名和回源地址。修改并保存 Share 端口时，可同步明确匹配的 FRP / 本地 YAML 回源，其他规则保留；Token 模式的回源需在 Cloudflare 控制台修改。
+- **组件管理**：扫描默认安装路径或手动选择程序；可获取 GitHub 官方最新稳定版 frpc，也可打开官方下载页。安装和版本检测不会连接隧道。
+- **运行日志**：按服务筛选、搜索、暂停显示及导出。暂停显示不会停止服务；导出或分享前仍需检查业务敏感内容。
+- **外观**：石墨薄荷、暖白森林、午夜蓝、柔和紫四套主题，弹窗与表单统一换肤，设置本机保存。
+
+![桌面控制台：Cloudflare 表单配置](docs/screenshots/desktop-console-cloudflare.png)
+
+截图来自当前源码，使用演示配置和示例地址，不包含真实凭证或个人项目路径。多条已有 HTTP(S) 域名规则可选择编辑；复杂 YAML 仍可使用高级模式，原有未知字段与注释保留。
+
+### 启动控制台
+
+版本包解压后，Windows 双击 `lan_codex_desktop.exe`，macOS 打开 `LAN Codex Share.app`，Linux 运行 `./lan_codex_desktop`；均无需安装 Python。命令行可用 `--config=./lan_config.toml` 指定配置，默认读取发行目录中的配置（macOS 在 `.app` 外侧）。
+
+安装独立 CPython 3.11+，在项目目录运行以下命令（桌面平台要求见 [完整说明](DESKTOP.md#发行平台)）。上游 Codex CLI 仍需本机安装并登录。
+
+Windows PowerShell：
+
+```powershell
+python -m venv .venv-desktop
+.\.venv-desktop\Scripts\python.exe -m pip install -r requirements-desktop.txt
+.\start_lan_codex_desktop.cmd --config=./lan_config.toml
+```
+
+macOS / Linux：
+
+```sh
+python3 -m venv .venv-desktop
+.venv-desktop/bin/python -m pip install -r requirements-desktop.txt
+bash start_lan_codex_desktop.sh --config=./lan_config.toml
+```
+
+首次运行可在配置管理中创建示例，再选择工作目录并填写配置。保存不会自动重启运行中的服务。控制台只管理自己启动的进程；外部 Share 和明确匹配配置的单个外部 FRP 可在再次确认后关闭，外部 Cloudflare / Windows 隧道服务仅检测，不自动接管。
+
+详细配置、外部进程边界、平台要求和打包说明见 [桌面控制台文档](DESKTOP.md)。原有 `start_lan_codex_share.cmd/.sh` 仍只启动 Share，不会连带启动 frpc 或 Cloudflare。
 
 ## 前置条件
 
@@ -131,7 +177,9 @@ session_ids = [
 ]
 permission_mode = "danger-full-access"
 password = ""
-public_origin = ""
+notify_on_task_complete = false
+cloudflare_origin = ""
+frp_origin = ""
 host = "0.0.0.0"
 port = 8765
 app_server_port = 4500
@@ -141,6 +189,18 @@ preview_roots = [
 ```
 
 相对路径以 `lan_config.toml` 所在目录为基准。`lan_config.toml` 是本机配置，已被 Git 忽略；仓库只提交不含个人路径的 `lan_config.example.toml`。
+
+### 任务结束提示与预览目录
+
+`notify_on_task_complete = true` 开启网页常驻提示，缺省或 `false` 关闭。也可以在桌面控制台「配置管理 → Share」勾选“任务结束提示”并保存。保存后需手动重启 Share、刷新网页，不会自动启停任何服务。
+
+开启后，当前查看 Session 的任务完成、失败或中断会在输入区上方靠右显示提示，必须点击 × 关闭；连续任务的提示可逐个关闭。多人查看时各自收到、各自关闭。刷新、切换 Session 或加载更早历史不会补弹旧任务；短暂重连对仍在当前快照内的任务去重，长时间断线且任务离开历史窗口则不补查。仅网页打开并已登录时工作，没有系统通知、声音或全 Session 后台提醒。
+
+控制台中的 `preview_roots` 使用目录列表，通过“添加目录…”逐次选择目录，选中后可移除。新增路径优先相对配置文件保存，跨磁盘使用绝对路径，并自动去重；旧路径保持原样。只有点击“校验并保存”才写入配置，移除项不会删除磁盘文件。原始 TOML 编辑仍支持直接修改数组。
+
+### 其他配置项
+
+桌面控制台可在“配置管理 → Session 共享范围”选择指定会话、共享全部或自动单会话。指定会话以列表展示，支持批量添加、复制 ID、移除；无需手写数组。未添加输入会阻止保存，删除最后一项不会自动共享全部，移除也不会删除真实会话。保存后需手动重启 Share 生效；详情见 [桌面控制台说明](DESKTOP.md)。
 
 - `session_ids = []`：获取本机全部未归档主 Session，排除子代理任务，并按“项目 → Session”分组。Session 首次打开时才建立连接；新任务会自动出现在目录中，无需重启服务。
 - `session_ids = ["Session A", "Session B"]`：固定共享这些会话。每个会话拥有独立历史投影、处理状态、模型设置和等待队列，并可同时执行任务；任一会话恢复失败时启动会直接报错，不会自动创建替代会话。
@@ -152,7 +212,10 @@ preview_roots = [
 - `password = ""`：不启用登录；设置非空字符串后，浏览器需要先输入该密码。登录凭证从登录起固定有效 **30 天**（不会因访问自动延期），期间重启共享程序或关闭浏览器无需再次输入密码。浏览器禁用/清除 Cookie、无痕窗口关闭或切换访问域名时仍需登录。真实密码只应写入已忽略的 `lan_config.toml`。
 - 登录签名密钥保存在配置文件旁的 `runtime/lan/auth.json`，升级时需保留该文件及其所在目录；它属于敏感运行数据，不要提交或分享。首次从旧版升级需重新登录一次。修改密码并重启后旧凭证失效；以空密码启动后再次开启密码也会使旧登录失效。需要主动撤销全部登录时，可停止共享程序、删除该文件后重新启动；不要恢复旧密钥备份来撤销登录。文件损坏、不可读或密钥无法写入时拒绝启动，不会退化为免登录。
 - Cookie 使用 `HttpOnly`、`SameSite=Strict`，公网 HTTPS 入口附加 `Secure`。局域网 HTTP 登录不加 `Secure`，凭证没有传输加密，仅适合可信网络；公网请继续使用 HTTPS。浏览器不保存密码明文。
-- `public_origin = ""`：仅启用原有局域网访问；填写完整的 HTTPS 域名地址后，额外接受该公网入口。不支持通配符、路径、查询参数或多个域名。
+- `cloudflare_origin = ""`：Cloudflare 公网入口，填写完整 HTTPS 地址后启用，留空或省略关闭该入口。
+- `frp_origin = ""`：frp 公网入口，支持 `http://IPv4:端口` 或 HTTPS 地址，留空或省略关闭该入口。HTTP 默认端口为 80，必须设置非空白项目密码。
+- 两项都不配置/都留空时仅本机和局域网可访问；只填一项启用对应公网入口，两项同时填写则共用同一 Web 端口、Session、任务队列和项目密码。不同域名/IP 的浏览器登录各自保存 30 天，不能自动跨域免登录。这些字段是允许访问的入口，不会自动启动或停止 cloudflared/frpc。
+- 旧版 `public_origin` 仍可单独使用；迁移到新字段时必须删除旧字段，即使其值为 `""`。旧字段与任意新字段同时出现会报配置冲突。不支持通配符、路径或查询参数；同一个 Host 和端口不能配置两种不同协议，以免回源无法区分。
 
 网页目前没有交互式审批弹窗，因此审批策略固定为 `never`；实际访问范围由 `permission_mode` 限制。本机 CLI 会连接所选 Session，并采用相同权限模式。
 
@@ -166,20 +229,55 @@ preview_roots = [
 
 ```toml
 port = 9000
-public_origin = "https://codex.example.com"
+cloudflare_origin = "https://codex.example.com"
 password = "请替换为你自己的长随机密码"
 ```
 
 同一台电脑运行 `cloudflared`，在 Cloudflare Tunnel 中添加该域名的 Published application 路由，Service URL 填 `http://localhost:9000`，Path 留空。保留原始 Host，不要将 HTTP Host Header 覆写为 localhost；建议在 Cloudflare 开启 HTTP 到 HTTPS 重定向。若希望只用项目密码，可不创建 Cloudflare Access 应用（已经创建的则移除该域名对应的 Access 保护），Tunnel 本身仍保留。随后重启共享服务并刷新网页。
 
-- 公网只接受 `public_origin` 指定的域名和端口，发送操作仍校验 HTTPS Origin 和 CSRF；现有局域网 HTTP 入口不变。
+- 此入口只接受 `cloudflare_origin` 指定的域名和端口，发送操作仍校验对应 HTTPS Origin 和 CSRF；可同时配置 `frp_origin`，现有局域网 HTTP 入口不变。
 - 公网域名的回源连接必须来自本机回环地址；不接受其他局域网设备冒充代理，不信任 `X-Forwarded-Host`、`X-Forwarded-Proto`、`X-Forwarded-For` 或 `CF-Connecting-IP` 来放行请求。`cloudflared` 不应运行在另一台电脑或独立容器网络中。
 - 设置密码后，会话、事件流、图片、文件预览和下载、任务操作均要求项目登录。HTTPS 登录 Cookie 使用 `Secure`、`HttpOnly`、`SameSite=Strict`；局域网 HTTP 登录单独保留兼容行为。
 - 允许临时设置 `password = ""` 完全免登录，启动时会输出公网安全警告。**这不是匿名只读模式：所有访问者均可发送任务、读取授权文件，并按配置权限操作本机。** 强烈建议设置密码，并限制共享 Session 和权限。
 - 登录失败限流按直接连接地址计算，同一个本机 Tunnel 的访问者共享限流额度：一分钟内五次失败后暂时禁止登录。忽略转发 IP 是为了防止伪造请求头绕过限流。
-- 修改密码或公网地址需要重启共享服务，原登录 Cookie 随重启失效；域名和真实密码只放在已忽略的本机配置中。
+- 修改密码或公网地址需要重启共享服务；仅重启仍保留 30 天登录，改密码会撤销旧凭证，换域名/IP 需重新登录。域名和真实密码只放在已忽略的本机配置中。
 
 程序不会自动安装、启动或管理 Tunnel。
+
+## frp 单端口公网访问
+
+适用于已有 frps、使用服务器 **IP＋端口** 访问的场景。frpc 只配置一条 TCP 转发：`公网 IP:20000 → 同机 frpc → 127.0.0.1:9000`，其他服务继续由 Share 的 `/proxy/目标:端口/` 分发，不需要逐个增加 frp 代理。
+
+以下 `192.0.2.10` 是文档专用示例地址，必须替换为实际服务器 IP。在已有 `lan_config.toml` 中修改对应字段（不要重复添加同名字段）：
+
+```toml
+port = 9000
+frp_origin = "http://192.0.2.10:20000"
+password = "请替换为自己的长随机项目密码"
+```
+
+1. 下载与 frps 兼容的平台版 frpc，将 `frpc.exe`（Windows）或可执行的 `frpc`（macOS/Linux）放在项目同目录，或加入 PATH。
+2. 复制 [frpc.example.toml](frpc.example.toml) 为 `frpc.toml`，修改 `serverAddr` 和 `auth.token`。保留 `localIP = "127.0.0.1"`、`localPort = 9000`；`remotePort = 20000` 必须在 frps 允许范围内且未被其他代理占用。
+3. 手动启动共享程序，再在另一终端运行 `start_frpc.cmd` 或 `sh ./start_frpc.sh`。脚本默认读取同目录 `frpc.toml`；可传入配置路径，例如 `start_frpc.cmd "D:\configs\team.toml"` 或 `sh ./start_frpc.sh ./configs/team.toml`。自定义相对路径按当前终端目录解析；脚本不安装程序、不后台托管，也不会启动或停止 Share/业务服务。
+4. 访问以下入口：
+
+```text
+http://192.0.2.10:20000/
+http://192.0.2.10:20000/?session=会话ID
+http://192.0.2.10:20000/proxy/localhost:13333/
+http://192.0.2.10:20000/proxy/localhost:3301/#/login
+```
+
+`serverPort = 7000` 是 frpc 连接 frps 的控制端口，`remotePort = 20000` 才是浏览器业务端口；“一个端口”指多个业务复用一个访问端口，不表示服务器总共只需开放一个端口。新增本地服务直接换 `/proxy/` 路径，不改 frpc 配置。frp TCP 转发方式参见 [frp 官方说明](https://github.com/fatedier/frp#access-your-computer-in-a-lan-network-via-ssh)。
+
+注意事项：
+
+- HTTP 公网必须设置项目密码，frp token 只用于 frpc/frps 连接认证，不能替代网页登录密码。登录、30 天凭证、SSE 流式回复、图片和文件权限继续沿用现有机制。
+- **浏览器到公网服务器的 HTTP 流量是明文，包括密码、Cookie 和聊天内容。`transport.tls.enable = true` 只保护 frpc/frps 链路。** 敏感使用请在公网入口增加可信 HTTPS，不能把设置密码理解为传输加密。
+- 浏览器 Cookie 不按端口隔离。同一公网 IP 的其他端口不构成可靠的 Cookie 安全边界，不应与不可信服务共用此 IP；公网多租户部署优先使用专属 HTTPS 域名。
+- frpc 必须在共享程序同机运行并回源 `127.0.0.1:9000`。独立容器网络或另一台设备回源会被拒绝；不启用 PROXY protocol，不改写原始 Host，不依赖伪造转发头。对外只开放 frps 所需端口，不要直接暴露本机 Share 或 App Server。
+- `frp_origin` 与 `cloudflare_origin` 可同时填写；两个客户端都回源 `127.0.0.1:9000` 即可，不需要启动两个 Share。任选一项或都不配置也支持，原有局域网入口不变。更改配置后手动重启 Share；程序不改 frps、安全组、防火墙或服务器证书。
+- `frpc.toml`、`frpc.local.toml` 及同目录 frpc 二进制已忽略，不会自动提交；不要把真实 IP/token 写入示例文件。当前 frpc 脚本作为源码配套使用，不代表版本包已内置 frpc。
 
 ## 动态反代本机及局域网服务
 
@@ -235,7 +333,7 @@ http://192.168.1.20:9000/proxy/localhost:1122/
 | 页面返回 200，但仍然白屏 | 在浏览器 Network 中检查必需的 JS/CSS 是否失败。Vite 开发页面会产生大量模块请求；v0.1.6 增大连接等待队列以缓解突发连接重置，但不保证消除所有 502。 |
 | 二维码或接口返回的图片加载失败 | 检查返回 URL 的主机、端口及协议。同一后端 JSON 资源 URL 可自动适配；其他 HTTPS 服务、压缩或超限 JSON 不在该处理范围。 |
 | 代理页提示先登录或返回 401 | 先在共享首页输入项目密码，再刷新代理页；目标服务自己的登录可能仍然需要。 |
-| 返回 400/403 | 核对 `public_origin`、Host、Origin、显式端口和目标地址范围；共享端口与 App Server 端口不能作为反代目标。不要通过伪造转发头绕过检查。 |
+| 返回 400/403 | 核对对应的 `cloudflare_origin` / `frp_origin`（或旧 `public_origin`）、Host、Origin、显式端口和目标地址范围；共享端口与 App Server 端口不能作为反代目标。不要通过伪造转发头绕过检查。 |
 | 某项 WebSocket 功能失败 | 确认对应端口确实运行 WebSocket 服务。目标服务本身不可用时，反代不会将它启动。 |
 
 停止程序时按一次 Ctrl+C，等待后台连接清理结束。连续中断可能打断现有清理流程并显示 `KeyboardInterrupt`；本版本没有修复重复 Ctrl+C 的退出体验。CMD 出现 `Terminate batch job (Y/N)?` 时输入 `Y`，不必反复按 Ctrl+C。
@@ -244,7 +342,7 @@ http://192.168.1.20:9000/proxy/localhost:1122/
 
 1. 备份并保留本机 `lan_config.toml` 和 `runtime/`，不要用示例配置覆盖真实配置。
 2. 停止旧共享程序，替换对应平台程序；源码用户更新代码并使用现有虚拟环境安装 `requirements.txt`。
-3. 仅需内网访问时保留 `public_origin = ""`；需要公网时按上文配置域名、同机 Tunnel 和项目密码。
+3. 仅需内网访问时将 `cloudflare_origin` 和 `frp_origin` 都留空；需要公网时任选一项或同时配置两项，按上文设置同机穿透客户端和项目密码。由旧配置迁移时删除 `public_origin`，不要与新字段混用。
 4. 重新启动共享程序并刷新浏览器。本版本包含服务端改动，仅刷新页面不能使全部修复生效。
 
 升级不会自动安装或重启 Tunnel，也不需要本工具修改或重启被代理的业务服务。版本包不包含个人配置、聊天运行数据或日志；完整功能变更见 [版本发布记录](https://github.com/hcr707305003/lan_codex_share/releases)。

@@ -1,7 +1,18 @@
 .venv/
+.venv-desktop/
 venv/
 lan_config.toml
 lan_config.local.toml
+frpc.toml
+frpc.local.toml
+/frpc
+/frpc.exe
+desktop_config.toml
+cloudflared.yml
+cloudflared.yaml
+*credentials.json
+cloudflared-token.txt
+/bin/
 runtime/*
 !runtime/.gitkeep
 __pycache__/
@@ -34,3 +45,4 @@ Thumbs.db
 .bug-hunter/
 .superpowers/
 output/playwright/
+.playwright-cli/

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>LAN Codex Share — terminal and connection</title>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="#223e33"/>
+  <path d="m17 22 10 10-10 10M35 23h9v18h-9" fill="none" stroke="#b3efd0" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M44 32h7" stroke="#b3efd0" stroke-width="4"/>
+  <circle cx="51" cy="32" r="4" fill="#b3efd0"/>
+</svg>

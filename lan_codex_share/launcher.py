@@ -80,6 +80,9 @@ def main(
 ) -> int:
     configure_console()
     args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) == 2 and args[0] == "_desktop-worker":
+        from .desktop.worker import run_worker
+        return run_worker(Path(args[1]).resolve())
     program_name = Path(sys.argv[0]).stem or "lan_codex_share"
     if program_name in {"__main__", "run_lan_codex_share"}:
         program_name = "lan_codex_share"

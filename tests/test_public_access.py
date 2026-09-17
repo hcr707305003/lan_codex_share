@@ -44,7 +44,7 @@ def test_public_login_and_protected_routes(public_app, tmp_path):
         assert request(server, "GET", path, headers=headers)[0] == 200
     status, _, body = request(server, "GET", "/api/auth/status", headers=headers)
     assert status == 200
-    assert json.loads(body) == {"required": True, "authenticated": False}
+    assert json.loads(body) == {"required": True, "authenticated": False, "notify_on_task_complete": False}
     for path in paths:
         assert request(server, "GET", path, headers=headers)[0] == 401
     assert request(server, "POST", "/api/messages", b'{"text":"blocked"}', headers)[0] == 401
@@ -118,7 +118,7 @@ def test_passwordless_public_mode_is_explicitly_supported(tmp_path):
         headers = public_headers(app)
         assert request(server, "GET", "/api/snapshot", headers=headers)[0] == 200
         status, _, body = request(server, "GET", "/api/auth/status", headers=headers)
-        assert json.loads(body) == {"required": False, "authenticated": True}
+        assert json.loads(body) == {"required": False, "authenticated": True, "notify_on_task_complete": False}
         assert request(server, "POST", "/api/messages", b'{"text":"hello"}', headers)[0] == 202
         assert len(service.submitted) == 1
         assert request(server, "POST", "/api/messages", b'{"text":"blocked"}', {**headers, "X-CSRF-Token": "wrong"})[0] == 403

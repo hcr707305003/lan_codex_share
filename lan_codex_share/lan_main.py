@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 import socket
 import sys
+import threading
 
 import psutil
 
@@ -24,6 +25,7 @@ from .lan_web import LanWebApplication
 from .session_hub import LanSessionHub
 from .session_projection import SessionProjection
 from .state_store import StateStore
+from .share_instance import write_instance, remove_instance
 
 
 def _lock_stream(stream, platform_name: str | None = None) -> None:
@@ -193,7 +195,7 @@ def _build_session_hub(config, runtime: Path, image_store: ImageStore) -> LanSes
     return LanSessionHub(services, logging.getLogger("lan.sessions"))
 
 
-def run(config_path: str | Path) -> int:
+def run(config_path: str | Path, *, stop_event=None, on_ready=None, on_owned=None) -> int:
     config_path = Path(config_path).expanduser().resolve()
     runtime = config_path.parent / "runtime" / "lan"
     try:
@@ -219,6 +221,7 @@ def run(config_path: str | Path) -> int:
         config.app_server_port,
         cwd=config.workspace,
         logger=logging.getLogger("lan.app_server"),
+        hide_console=stop_event is not None,
     )
     hub = _build_session_hub(config, runtime, image_store)
     request_limit = config.max_images * ((config.max_image_bytes + 2) // 3 * 4) + 1024 * 1024
@@ -236,10 +239,19 @@ def run(config_path: str | Path) -> int:
                     password=config.password,
                     auth_state_path=runtime / "auth.json",
                     public_origin=config.public_origin,
+                    cloudflare_origin=config.cloudflare_origin,
+                    frp_origin=config.frp_origin,
                     app_server_port=config.app_server_port,
+                    notify_on_task_complete=config.notify_on_task_complete,
                     logger=logging.getLogger("lan.web"),
                 )
                 app_server.start()
+                try:
+                    write_instance(config_path, app_server, config.port)
+                except (OSError, ValueError, psutil.Error):
+                    logging.warning('无法记录本地实例信息；桌面客户端将仅使用实时进程信息识别 Share')
+                if on_owned is not None:
+                    on_owned(app_server._owned_processes)
                 hub.start()
                 server = app.create_server(config.host, config.port)
                 actual_port = int(server.server_address[1])
@@ -248,8 +260,12 @@ def run(config_path: str | Path) -> int:
                 print("动态反代：在分享地址后添加 /proxy/localhost:端口/ 或 /proxy/内网IP:端口/，无需登记服务。")
                 if not config.password:
                     logging.warning("动态反代未设置项目密码：访问者可操作可达的本机及内网 HTTP 服务；这些操作不受 Codex permission_mode 限制。")
-                if config.public_origin:
-                    print(f"公网分享地址：{config.public_origin}/")
+                for label, entry in (("Cloudflare", config.cloudflare_origin), ("frp", config.frp_origin), ("兼容入口", config.public_origin)):
+                    if entry:
+                        print(f"{label} 公网分享地址：{entry}/")
+                if config.public_origins:
+                    if any(entry.startswith("http://") for entry in config.public_origins):
+                        logging.warning("HTTP 公网入口未加密浏览器到服务器的密码、Cookie 和会话内容；frp TLS 只保护 frpc/frps 链路，敏感使用请配置 HTTPS。")
                     if config.password:
                         print("公网访问保护：项目密码登录")
                     else:
@@ -278,13 +294,32 @@ def run(config_path: str | Path) -> int:
                 print("按 Ctrl+C 停止服务。")
                 print("=" * 72)
                 logging.info("LAN Shared Codex Session listening on %s:%s", config.host, actual_port)
-                server.serve_forever(poll_interval=0.5)
+                finished = threading.Event()
+
+                def watch_stop():
+                    while not finished.is_set():
+                        if stop_event.wait(0.2):
+                            if not finished.is_set():
+                                server.shutdown()
+                            return
+
+                watcher = None
+                if stop_event is not None:
+                    watcher = threading.Thread(target=watch_stop, daemon=True)
+                    watcher.start()
+                try:
+                    if on_ready is not None:
+                        on_ready()
+                    server.serve_forever(poll_interval=0.5)
+                finally:
+                    finished.set()
             except KeyboardInterrupt:
                 logging.info("正在关闭局域网共享 Codex 会话服务")
             except (OSError, ValueError, CodexClientError, AppServerHostError) as exc:
                 logging.error("启动失败：%s", exc)
                 return 4
             finally:
+                remove_instance(config_path)
                 if server:
                     server.stopping.set()  # type: ignore[attr-defined]
                     server.server_close()

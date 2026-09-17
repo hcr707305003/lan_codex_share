@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 
-@pytest.mark.parametrize("filename", ["markdown.test.cjs", "proxy-client.test.cjs", "history.test.cjs", "realtime.test.cjs", "auth.test.cjs"])
+@pytest.mark.parametrize("filename", ["markdown.test.cjs", "proxy-client.test.cjs", "history.test.cjs", "realtime.test.cjs", "auth.test.cjs", "notifications.test.cjs"])
 def test_markdown_renderer(filename):
     node = shutil.which("node")
     if node is None:

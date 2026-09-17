@@ -24,6 +24,26 @@
 
 ## 首次配置仓库
 
+### 桌面客户端构建
+
+流水线额外安装 `requirements-desktop.txt`，运行 offscreen GUI 测试，并用 `lan_codex_desktop.spec` 构建目录型 GUI；现有 Share/CLI 可执行程序继续单独构建。Qt 许可证由 `scripts/prepare_desktop_licenses.py` 从版本固定的官方源码获取，缺少时构建失败。
+
+本地验证命令（在独立 CPython 环境中）：
+
+```sh
+python -m pip install -r requirements-dev.txt -r requirements-desktop.txt
+python -m pytest -q
+python scripts/prepare_desktop_licenses.py
+python -m PyInstaller --noconfirm lan_codex_share.spec
+python -m PyInstaller --noconfirm lan_codex_desktop.spec
+```
+
+组包使用 `scripts/package_release.py --version <程序当前版本> --platform <目标平台> --with-desktop`，把 GUI 与配套 CLI 放在一个 ZIP。不传 `--with-desktop` 时仍可生成原有 CLI 包。GUI 构建后的 `--smoke-test --config=<临时目录>/lan_config.toml` 会只打开并关闭窗口，不启动真实服务。
+
+五平台均运行桌面核心与 UI 测试。Linux 使用 `QT_QPA_PLATFORM=offscreen`，本地实际使用仍需桌面环境。macOS GUI 最低系统和 Linux glibc 要求见 [桌面说明](DESKTOP.md)。未经过构建测试的平台不能仅凭其他平台结果宣称兼容。
+
+目前未配置签名或 macOS 公证。发布前检查 Qt/其他依赖的许可文本和第三方告知是否齐全；未改版本号、未推标签不会发布。
+
 GitHub Actions 使用仓库自带的 `GITHUB_TOKEN` 创建 Release，不需要额外添加访问令牌。仓库需要满足以下条件：
 
 - GitHub Actions 已启用；

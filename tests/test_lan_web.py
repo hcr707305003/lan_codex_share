@@ -100,7 +100,7 @@ class FakeService:
         self.subscribers.discard(subscriber)
 
 
-def start_app(tmp_path, *, password="", public_origin="", auth_state_path=None):
+def start_app(tmp_path, *, password="", public_origin="", auth_state_path=None, cloudflare_origin="", frp_origin="", notify_on_task_complete=False):
     service = FakeService()
     images = ImageStore(tmp_path / "uploads", max_bytes=1024 * 1024, max_images=4)
     app = LanWebApplication(
@@ -112,6 +112,9 @@ def start_app(tmp_path, *, password="", public_origin="", auth_state_path=None):
         password=password,
         auth_state_path=auth_state_path,
         public_origin=public_origin,
+        cloudflare_origin=cloudflare_origin,
+        frp_origin=frp_origin,
+        notify_on_task_complete=notify_on_task_complete,
     )
     server = app.create_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -128,6 +131,27 @@ def request(server, method, path, body=None, headers=None):
     data = response.read()
     connection.close()
     return response.status, response.getheaders(), data
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_task_notification_flag_and_script(tmp_path, enabled):
+    app, _, server, thread = start_app(tmp_path, notify_on_task_complete=enabled)
+    try:
+        status, _, data = request(server, 'GET', '/api/auth/status')
+        assert status == 200
+        assert json.loads(data)['notify_on_task_complete'] is enabled
+        status, _, page = request(server, 'GET', '/')
+        assert status == 200
+        url = app.static_assets.url('notifications.js')
+        assert url.encode() in page
+        status, headers, data = request(server, 'GET', url)
+        assert status == 200
+        assert b'TaskCompletionTracker' in data
+        assert 'immutable' in dict(headers)['Cache-Control']
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def mutation_headers(server, csrf):
@@ -314,7 +338,7 @@ def test_page_snapshot_and_message_post(tmp_path):
 
         status, _, auth_status = request(server, "GET", "/api/auth/status")
         assert status == 200
-        assert json.loads(auth_status) == {"required": False, "authenticated": True}
+        assert json.loads(auth_status) == {"required": False, "authenticated": True, "notify_on_task_complete": False}
 
         status, _, snapshot = request(server, "GET", "/api/snapshot")
         assert status == 200
@@ -346,7 +370,7 @@ def test_password_authentication_protects_data_routes_and_uses_persistent_cookie
         assert request(server, "GET", "/app.js")[0] == 200
         status, _, body = request(server, "GET", "/api/auth/status")
         assert status == 200
-        assert json.loads(body) == {"required": True, "authenticated": False}
+        assert json.loads(body) == {"required": True, "authenticated": False, "notify_on_task_complete": False}
 
         for path in (
             "/api/snapshot",
@@ -380,7 +404,7 @@ def test_password_authentication_protects_data_routes_and_uses_persistent_cookie
 
         status, _, body = request(server, "GET", "/api/auth/status", headers={"Cookie": cookie})
         assert status == 200
-        assert json.loads(body) == {"required": True, "authenticated": True}
+        assert json.loads(body) == {"required": True, "authenticated": True, "notify_on_task_complete": False}
         assert request(server, "GET", "/api/snapshot", headers={"Cookie": cookie})[0] == 200
         assert request(server, "GET", f"/api/images/{image_id}", headers={"Cookie": cookie})[0] == 200
         assert request(

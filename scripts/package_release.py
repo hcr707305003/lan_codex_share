@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 import zipfile
@@ -34,6 +35,7 @@ def package_release(
     dist_directory: Path,
     output_directory: Path,
     project_root: Path,
+    include_desktop: bool = False,
 ) -> Path:
     if version != __version__:
         raise ValueError(f"version {version} does not match package version {__version__}")
@@ -54,6 +56,36 @@ def package_release(
             0o100644,
         )
         add_file(archive, project_root / "RELEASE_README.md", f"{root_name}/README.md", 0o100644)
+        if include_desktop:
+            if platform_name.startswith("macos"):
+                gui_root = dist_directory / "LAN Codex Share.app"
+                prefix = f"{root_name}/LAN Codex Share.app"
+                gui_executable = gui_root / "Contents" / "MacOS" / "lan_codex_desktop"
+            else:
+                gui_root = dist_directory / "lan_codex_desktop"
+                prefix = root_name
+                gui_executable = gui_root / ("lan_codex_desktop.exe" if platform_name.startswith("windows") else "lan_codex_desktop")
+            if not gui_executable.is_file():
+                raise FileNotFoundError(f"missing desktop executable: {gui_executable}")
+            for source in sorted(gui_root.rglob("*")):
+                if source.is_symlink():
+                    if not source.resolve().is_relative_to(gui_root.resolve()):
+                        raise ValueError("desktop distribution symlink escapes its root")
+                    info = zipfile.ZipInfo(f"{prefix}/{source.relative_to(gui_root).as_posix()}")
+                    info.create_system = 3
+                    info.external_attr = 0o120777 << 16
+                    archive.writestr(info, os.path.relpath(source.resolve(), source.parent).replace('\\', '/'))
+                    continue
+                if source.is_file():
+                    relative = source.relative_to(gui_root).as_posix()
+                    if source.name in {"lan_config.toml", "desktop_config.toml", "frpc.toml", "cloudflared.yml"} or source.suffix in {".log", ".tmp"}:
+                        raise ValueError("private/runtime file found in desktop distribution")
+                    if source.is_symlink() and not source.resolve().is_relative_to(gui_root.resolve()):
+                        raise ValueError("desktop distribution symlink escapes its root")
+                    mode = 0o100755 if source.stat().st_mode & 0o111 else 0o100644
+                    add_file(archive, source, f"{prefix}/{relative}", mode)
+            for name in ("desktop_config.example.toml", "frpc.example.toml", "cloudflared.example.yml", "THIRD_PARTY_DESKTOP.md"):
+                add_file(archive, project_root / name, f"{root_name}/{name}", 0o100644)
     return archive_path
 
 
@@ -63,6 +95,7 @@ def main() -> int:
     parser.add_argument("--platform", required=True, choices=sorted(PLATFORMS))
     parser.add_argument("--dist-dir", type=Path, default=Path("dist"))
     parser.add_argument("--output-dir", type=Path, default=Path("release"))
+    parser.add_argument("--with-desktop", action="store_true")
     args = parser.parse_args()
     project_root = Path(__file__).resolve().parents[1]
     path = package_release(
@@ -71,6 +104,7 @@ def main() -> int:
         dist_directory=args.dist_dir.resolve(),
         output_directory=args.output_dir.resolve(),
         project_root=project_root,
+        include_desktop=args.with_desktop,
     )
     print(path)
     return 0

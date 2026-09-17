@@ -431,6 +431,18 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .turn-status.failed { color: var(--danger); }
 
 .composer-region { position: relative; z-index: 4; min-width: 0; max-width: 100%; padding: 0 max(20px, calc((100% - var(--content-width)) / 2)) calc(14px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 25%); }
+.task-notifications { position: absolute; right: 20px; bottom: calc(100% + 12px); width: min(360px, calc(100% - 40px)); max-height: min(360px, 40dvh); overflow-y: auto; overscroll-behavior: contain; display: grid; gap: 8px; padding: 4px; border-radius: 14px; }
+.task-notifications[hidden] { display: none; }
+.task-notification { position: relative; padding: 14px 52px 14px 16px; border: 1px solid var(--border-strong); border-left: 3px solid var(--success); border-radius: 12px; background: var(--panel); box-shadow: 0 6px 24px #0004; overflow-wrap: anywhere; }
+.task-notification.failed { border-left-color: var(--danger); }
+.task-notification.interrupted { border-left-color: var(--warning); }
+.task-notification-title { display: block; color: var(--success); }
+.task-notification.failed .task-notification-title { color: var(--danger); }
+.task-notification.interrupted .task-notification-title { color: var(--warning); }
+.task-notification-name { color: var(--text); margin: 4px 0; font-size: 13px; }
+.task-notification-time { color: var(--text-soft); font-size: 12px; }
+.task-notification-close { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; border: 0; border-radius: 8px; background: transparent; color: var(--text-soft); font-size: 24px; }
+.task-notification-close:hover { background: var(--surface-hover); color: var(--text); }
 .processing-banner { position: relative; display: grid; min-width: 0; max-width: 100%; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; margin-bottom: 9px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--warning) 52%, var(--border)); border-radius: 11px; background: color-mix(in srgb, var(--warning) 10%, #252525); padding: 9px 12px 12px; color: #f2d494; box-shadow: 0 8px 24px rgba(0,0,0,.16); }
 .processing-banner[hidden] { display: none; }
 .processing-spinner { width: 19px; height: 19px; border: 2px solid color-mix(in srgb, var(--warning) 28%, transparent); border-top-color: var(--warning); border-radius: 50%; animation: spin .8s linear infinite; }

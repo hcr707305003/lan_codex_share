@@ -5,10 +5,16 @@ session_ids = []
 permission_mode = "danger-full-access"
 # 留空时不需要密码；设置非空字符串后，访问网页必须先登录。
 password = ""
-# 可选公网入口，留空保持仅局域网模式。Tunnel 在同一台电脑运行，回源本机 Web 端口。
-# 示例：public_origin = "https://codex.example.com"
-# 公网密码留空会完全免登录，所有访问者均可在配置权限内操作本机；强烈建议设置密码。
-public_origin = ""
+# 网页任务结束后显示需手动关闭的常驻提示，默认关闭；重启 Share 并刷新网页后生效。
+notify_on_task_complete = false
+# 两个公网入口相互独立，可都留空、只填一个或同时填写，回源同一个 Web 端口。
+# cloudflared/frpc 必须在同一台电脑运行。更换为新字段时删除旧 public_origin（即使旧值为空）。
+# Cloudflare 示例：cloudflare_origin = "https://codex.example.com"
+cloudflare_origin = ""
+# frp 示例：frp_origin = "http://192.0.2.10:20000"，HTTP 必须设置非空 password。
+frp_origin = ""
+# frpc.example.toml 回源 9000，使用时将下面 port 同步改为 9000。HTTP 明文，frp TLS 不保护浏览器链路。
+# HTTPS 公网密码留空会完全免登录，所有访问者均可在配置权限内操作本机；强烈建议设置密码。
 host = "0.0.0.0"
 port = 8765
 app_server_port = 4500

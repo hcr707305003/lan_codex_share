@@ -60,3 +60,20 @@ def test_pyinstaller_spec_includes_web_assets():
 
     assert '"lan_codex_share" / "web"' in spec
     assert 'name="lan_codex_share"' in spec
+
+
+def test_desktop_archive_contains_gui_and_companion(tmp_path):
+    dist = create_release_inputs(tmp_path, 'lan_codex_share.exe')
+    gui = dist / 'lan_codex_desktop'
+    gui.mkdir()
+    (gui / 'lan_codex_desktop.exe').write_bytes(b'gui')
+    (gui / '_internal').mkdir()
+    (gui / '_internal' / 'Qt6Core.dll').write_bytes(b'qt')
+    for name in ('desktop_config.example.toml', 'frpc.example.toml', 'cloudflared.example.yml', 'THIRD_PARTY_DESKTOP.md'):
+        (tmp_path / name).write_text('# example', encoding='utf-8')
+    archive = package_release(__version__, 'windows-x64', dist_directory=dist,
+                              output_directory=tmp_path / 'release', project_root=tmp_path, include_desktop=True)
+    with zipfile.ZipFile(archive) as content:
+        assert f'{archive.stem}/lan_codex_desktop.exe' in content.namelist()
+        assert f'{archive.stem}/lan_codex_share.exe' in content.namelist()
+        assert f'{archive.stem}/_internal/Qt6Core.dll' in content.namelist()

@@ -16,7 +16,7 @@ import time
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
-from .lan_access import AccessDenied, is_lan_client, normalize_public_origin, request_origin, validate_mutating_request
+from .lan_access import AccessDenied, is_lan_client, normalize_public_origin, normalize_entry_origins, request_origin, validate_mutating_request
 from .lan_store import ImageStore, ImageValidationError
 from .workspace_files import WorkspaceFileError, WorkspaceFilePreview, WorkspaceFileViewer
 from .dynamic_proxy import ProxyError, check_browser_origin, forward, parse_target
@@ -65,7 +65,10 @@ class LanWebApplication:
         password: str = "",
         auth_state_path: Path | None = None,
         public_origin: str = "",
+        cloudflare_origin: str = "",
+        frp_origin: str = "",
         app_server_port: int = 4500,
+        notify_on_task_complete: bool = False,
         logger: logging.Logger | None = None,
     ):
         self.service = service
@@ -75,17 +78,26 @@ class LanWebApplication:
         self.csrf_token = secrets.token_urlsafe(32)
         self.password = password
         self.public_origin = normalize_public_origin(public_origin)
+        self.cloudflare_origin = normalize_public_origin(cloudflare_origin)
+        self.frp_origin = normalize_public_origin(frp_origin)
+        if any(entry.startswith("http://") for entry in self.public_origins) and not password.strip():
+            raise ValueError("HTTP 公网入口必须设置非空 password；HTTP 不加密密码或会话内容")
         self.app_server_port = app_server_port
+        self.notify_on_task_complete = notify_on_task_complete
         self.auth_tokens = AuthTokens(password, auth_state_path)
         self.login_failures: dict[str, list[float]] = {}
         self.auth_lock = threading.Lock()
         self.logger = logger or logging.getLogger(__name__)
         self.web_root = Path(__file__).with_name("web")
-        missing_assets = [name for name in ("index.html", "app.js", "history.js", "realtime.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
+        missing_assets = [name for name in ("index.html", "app.js", "history.js", "realtime.js", "notifications.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
         if missing_assets:
             raise FileNotFoundError(f"Web 静态资源不完整：{', '.join(missing_assets)}")
         self.static_assets = StaticAssets(self.web_root)
         self.file_viewer = WorkspaceFileViewer(workspace or Path.cwd(), preview_roots=preview_roots)
+
+    @property
+    def public_origins(self) -> tuple[str, ...]:
+        return normalize_entry_origins(self.public_origin, self.cloudflare_origin, self.frp_origin)
 
     @property
     def password_required(self) -> bool:
@@ -174,9 +186,9 @@ class LanRequestHandler(BaseHTTPRequestHandler):
         if not is_lan_client(str(self.client_address[0])):
             raise AccessDenied("只允许局域网访问")
         host = self.headers.get("Host", "")
-        expected_origin = request_origin(host, self.app.allowed_hosts, self.app.public_origin)
-        if self.app.public_origin and expected_origin == self.app.public_origin:
-            # cloudflared must run on this host. Forwarding headers cannot grant trust.
+        expected_origin = request_origin(host, self.app.allowed_hosts, self.app.public_origins)
+        if expected_origin in self.app.public_origins:
+            # cloudflared/frpc must run on this host. Forwarding headers cannot grant trust.
             if not ip_address(self.client_address[0]).is_loopback:
                 raise AccessDenied("公网入口只接受本机反向代理连接")
         if mutation:
@@ -187,7 +199,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 csrf=self.headers.get("X-CSRF-Token", ""),
                 expected_csrf=self.app.csrf_token,
                 allowed_hosts=self.app.allowed_hosts,
-                public_origin=self.app.public_origin,
+                public_origin=self.app.public_origins,
             )
 
     def _require_authentication(self) -> None:
@@ -233,7 +245,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_bytes(200, asset.body, asset.mime, {"ETag": asset.etag}, cache_control=cache)
                 return
-            if path in {"/app.js", "/history.js", "/realtime.js"}:
+            if path in {"/app.js", "/history.js", "/realtime.js", "/notifications.js"}:
                 self._serve_asset(path[1:], "text/javascript; charset=utf-8")
                 return
             if path == "/style.css":
@@ -245,6 +257,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                     {
                         "required": self.app.password_required,
                         "authenticated": self.app.is_authenticated(self.headers.get("Cookie", "")),
+                        "notify_on_task_complete": self.app.notify_on_task_complete,
                     },
                     {"X-CSRF-Token": self.app.csrf_token},
                 )
@@ -456,7 +469,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 token = self.app.authenticate(raw_password, source_ip)
                 headers = None
                 if token:
-                    origin = request_origin(self.headers.get("Host", ""), self.app.allowed_hosts, self.app.public_origin)
+                    origin = request_origin(self.headers.get("Host", ""), self.app.allowed_hosts, self.app.public_origins)
                     secure = "; Secure" if origin.startswith("https://") else ""
                     headers = {
                         "Set-Cookie": f"{AUTH_COOKIE_NAME}={token}; Path=/; Max-Age={LOGIN_MAX_AGE}; HttpOnly; SameSite=Strict{secure}"

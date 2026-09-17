@@ -68,7 +68,7 @@ def parse_target(raw_path: str, blocked_ports: set[int]) -> ProxyTarget:
 
 
 def check_browser_origin(handler) -> str:
-    expected = request_origin(handler.headers.get("Host", ""), handler.app.allowed_hosts, handler.app.public_origin)
+    expected = request_origin(handler.headers.get("Host", ""), handler.app.allowed_hosts, handler.app.public_origins)
     origin = handler.headers.get("Origin", "")
     site = handler.headers.get("Sec-Fetch-Site", "")
     if origin and origin != expected:

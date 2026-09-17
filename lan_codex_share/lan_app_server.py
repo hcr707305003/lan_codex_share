@@ -28,6 +28,7 @@ class AppServerHost:
         cwd: str | Path | None = None,
         startup_timeout: float = 15,
         logger: logging.Logger | None = None,
+        hide_console: bool = False,
     ):
         self.host = host
         self.port = port
@@ -36,6 +37,7 @@ class AppServerHost:
         self.startup_timeout = startup_timeout
         self.logger = logger or logging.getLogger(__name__)
         self.process: subprocess.Popen[str] | None = None
+        self.hide_console = hide_console
         self.reusing_existing = False
         self._drainers: list[threading.Thread] = []
         self._owned_processes: list[psutil.Process] = []
@@ -122,6 +124,7 @@ class AppServerHost:
             text=True,
             encoding="utf-8",
             errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" and self.hide_console else 0,
         )
         for name, stream in (("stdout", self.process.stdout), ("stderr", self.process.stderr)):
             if stream:

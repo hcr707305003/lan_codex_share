@@ -37,4 +37,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(project_root / 'lan_codex_share' / 'desktop' / 'assets' / 'app-icon.ico') if os.name == 'nt' else None,
 )

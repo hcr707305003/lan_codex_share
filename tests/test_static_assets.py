@@ -10,7 +10,7 @@ def test_fingerprint_content_change_and_cache_boundaries(tmp_path):
         assert status == 200
         assert dict(headers)['Cache-Control'] == 'no-store'
         paths = re.findall(rb'(?:src|href)="(/assets/[^"]+)"', body)
-        assert len(paths) == 4
+        assert len(paths) == 5
         for path in paths:
             status, headers, asset = request(server, 'GET', path.decode())
             assert status == 200

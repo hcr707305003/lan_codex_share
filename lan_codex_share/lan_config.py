@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import tomllib
 
-from .lan_access import normalize_public_origin
+from .lan_access import normalize_public_origin, normalize_entry_origins
 
 
 class LanConfigError(ValueError):
@@ -29,6 +29,13 @@ class LanConfig:
     permission_mode: str = "danger-full-access"
     password: str = ""
     public_origin: str = ""
+    cloudflare_origin: str = ""
+    frp_origin: str = ""
+    notify_on_task_complete: bool = False
+
+    @property
+    def public_origins(self) -> tuple[str, ...]:
+        return normalize_entry_origins(self.public_origin, self.cloudflare_origin, self.frp_origin)
 
     @property
     def session_id(self) -> str | None:
@@ -108,13 +115,23 @@ def load_lan_config(path: str | Path) -> LanConfig:
     if permission_mode not in PERMISSION_MODES:
         choices = "、".join(sorted(PERMISSION_MODES))
         raise LanConfigError(f"permission_mode 必须是以下值之一：{choices}")
+    notify_on_task_complete = data.get("notify_on_task_complete", False)
+    if not isinstance(notify_on_task_complete, bool):
+        raise LanConfigError("notify_on_task_complete 必须是布尔值")
     password = data.get("password", "")
     if not isinstance(password, str):
         raise LanConfigError("password 必须是字符串")
+    if "public_origin" in data and ("cloudflare_origin" in data or "frp_origin" in data):
+        raise LanConfigError("public_origin 不能与 cloudflare_origin/frp_origin 混用，请删除旧字段")
     try:
         public_origin = normalize_public_origin(data.get("public_origin", ""))
+        cloudflare_origin = normalize_public_origin(data.get("cloudflare_origin", ""))
+        frp_origin = normalize_public_origin(data.get("frp_origin", ""))
+        entries = normalize_entry_origins(public_origin, cloudflare_origin, frp_origin)
     except ValueError as exc:
         raise LanConfigError(str(exc)) from exc
+    if any(entry.startswith("http://") for entry in entries) and not password.strip():
+        raise LanConfigError("HTTP 公网入口必须设置非空 password；HTTP 不加密密码或会话内容")
     preview_roots_raw = data.get("preview_roots", [])
     if not isinstance(preview_roots_raw, list) or not all(isinstance(item, str) for item in preview_roots_raw):
         raise LanConfigError("preview_roots 必须是路径字符串数组")
@@ -143,4 +160,7 @@ def load_lan_config(path: str | Path) -> LanConfig:
         permission_mode=permission_mode,
         password=password,
         public_origin=public_origin,
+        cloudflare_origin=cloudflare_origin,
+        frp_origin=frp_origin,
+        notify_on_task_complete=notify_on_task_complete,
     )

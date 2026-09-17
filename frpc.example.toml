@@ -1,0 +1,24 @@
+# Copy to frpc.toml and replace the documentation-only server IP and token.
+# Install an frpc version compatible with your frps; do not commit real credentials.
+serverAddr = "192.0.2.10"
+serverPort = 7000
+auth.method = "token"
+auth.token = "REPLACE_WITH_YOUR_FRP_TOKEN"
+transport.tls.enable = true
+log.to = "console"
+log.level = "info"
+
+# One business mapping for Share and all /proxy/ routes.
+# Start frpc on the same host as Share, outside an isolated container network.
+[[proxies]]
+name = "lan-codex-share"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 9000
+remotePort = 20000
+
+# Share config: port = 9000, frp_origin = "http://192.0.2.10:20000"
+# cloudflare_origin may be configured alongside frp_origin; remove legacy public_origin.
+# Set a non-empty project password (different from the frp token).
+# HTTP browser traffic is NOT encrypted by transport.tls.enable.
+# Keep the original Host; do not enable PROXY protocol for this upstream.

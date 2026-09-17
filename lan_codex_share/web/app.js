@@ -13,6 +13,7 @@ const imageInput = document.getElementById('images');
 const previews = document.getElementById('previews');
 const composer = document.querySelector('.composer');
 const composerRegion = document.querySelector('.composer-region');
+const taskNotifications = new TaskNotifications(document.getElementById('task-notifications'));
 const notice = document.getElementById('notice');
 const queueNode = document.getElementById('queue');
 const sendButton = document.getElementById('send');
@@ -173,6 +174,7 @@ function setNotice(text, isError = false) {
 }
 
 function showAuthentication(message = '', isError = false) {
+  taskNotifications.reset();
   appAuthenticated = false;
   refreshQueued = false;
   selectionGeneration += 1;
@@ -212,6 +214,7 @@ async function authenticationStatus() {
   if (!response.ok) throw new Error(result.error || '无法检查登录状态');
   const currentCsrf = response.headers.get('X-CSRF-Token');
   if (currentCsrf) csrf = currentCsrf;
+  taskNotifications.setEnabled(result.notify_on_task_complete === true && result.authenticated === true);
   return result;
 }
 
@@ -1090,6 +1093,7 @@ function renderTurn(turn, existing) {
 }
 
 function render(snapshot) {
+  taskNotifications.update(snapshot);
   latestSnapshot = snapshot;
   renderSessionSelector(snapshot);
   const thread = snapshot.thread || {};
@@ -1434,6 +1438,7 @@ function closeSidebar() { sidebar.classList.remove('open'); mobileScrim.hidden =
 
 function selectSession(next) {
   if (!next || next === selectedSessionId) return;
+  taskNotifications.reset();
   selectedSessionId = next;
   selectionGeneration += 1;
   refreshController?.abort();
@@ -1637,6 +1642,8 @@ authForm.addEventListener('submit', async event => {
     let result = {};
     try { result = await response.json(); } catch (_) { /* use generic error */ }
     if (!response.ok) throw new Error(result.error || (response.status === 429 ? '密码尝试过多，请稍后再试' : '密码错误'));
+    // Read notification settings before the first SSE baseline after password login.
+    await authenticationStatus();
     await startAuthenticatedApp();
   } catch (error) {
     authMessage.textContent = error.message || '无法登录';

@@ -15,7 +15,7 @@ class StaticAsset:
 class StaticAssets:
     """Only public application code, never HTML, user files or proxy content."""
 
-    def __init__(self, root: Path, names=('app.js', 'history.js', 'realtime.js', 'style.css')):
+    def __init__(self, root: Path, names=('app.js', 'history.js', 'realtime.js', 'notifications.js', 'style.css')):
         self.root = root
         self.names = names
         self._lock = threading.RLock()
