@@ -246,7 +246,23 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .sidebar-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-row.muted { color: var(--muted); }
 
-.main-panel { container-type: inline-size; display: grid; width: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; background: var(--bg); }
+.main-panel { container-type: inline-size; display: grid; width: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; background: var(--bg); }
+.main-panel > .topbar { grid-row: 1; }
+.main-panel > .timeline-shell { grid-row: 3; }
+.main-panel > .composer-region { grid-row: 4; }
+.session-notice { grid-row: 2; min-width: 0; border-bottom: 1px solid var(--border); padding: 0 20px; background: var(--panel); }
+.session-notice[hidden], .session-notice [hidden] { display: none !important; }
+.session-notice-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.session-notice button { border: 0; background: transparent; color: var(--text-soft); padding: 8px; min-height: 36px; cursor: pointer; border-radius: 6px; font: inherit; font-size: 12px; }
+.session-notice button:hover { color: var(--text); background: var(--surface-hover); }
+.session-notice :focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
+#session-notice-toggle { display: flex; gap: 8px; align-items: center; text-align: left; flex: 1; }
+#session-notice-toggle svg { width: 14px; height: 14px; }
+#session-notice-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.session-notice-body { max-height: min(280px, 35dvh); overflow: auto; overscroll-behavior: contain; padding: 10px 8px 16px; overflow-wrap: anywhere; }
+#session-notice-status { color: var(--text-soft); margin: 8px; font-size: 12px; }
+@media (max-width: 720px) { .session-notice { padding: 0 8px; } .session-notice button { min-height: 44px; } }
+@media (max-height: 500px) { .session-notice-body { max-height: min(20dvh, max(40px, calc(100dvh - 330px))); } }
 
 .topbar {
   z-index: 5;

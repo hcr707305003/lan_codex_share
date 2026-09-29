@@ -89,6 +89,8 @@ def test_hub_profile_is_metadata_only_and_damage_does_not_break_chat(tmp_path):
         assert project['sessions'][0]['name'] == 'Original session'
         assert hub.preview_roots == ()
         assert not hub._services[0].calls
+        hub.project_profile(key, {'alias': '后端', 'notice_markdown': ' \n\t', 'revision': 1})
+        assert hub.project_summaries()[0]['has_notice'] is False
         hub.profiles.path.write_text('broken', encoding='utf-8')
         hub.profiles = ProjectProfiles(hub.profiles.path)
         assert hub.project_summaries()[0]['profile_error']

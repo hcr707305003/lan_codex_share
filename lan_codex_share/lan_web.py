@@ -92,7 +92,7 @@ class LanWebApplication:
         self.auth_lock = threading.Lock()
         self.logger = logger or logging.getLogger(__name__)
         self.web_root = Path(__file__).with_name("web")
-        missing_assets = [name for name in ("index.html", "app.js", "history.js", "realtime.js", "notifications.js", "tasks.js", "profiles.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
+        missing_assets = [name for name in ("index.html", "app.js", "history.js", "realtime.js", "notifications.js", "tasks.js", "profiles.js", "notice.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
         if missing_assets:
             raise FileNotFoundError(f"Web 静态资源不完整：{', '.join(missing_assets)}")
         self.static_assets = StaticAssets(self.web_root)
@@ -248,7 +248,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_bytes(200, asset.body, asset.mime, {"ETag": asset.etag}, cache_control=cache)
                 return
-            if path in {"/app.js", "/history.js", "/realtime.js", "/notifications.js", "/tasks.js", "/profiles.js"}:
+            if path in {"/app.js", "/history.js", "/realtime.js", "/notifications.js", "/tasks.js", "/profiles.js", "/notice.js"}:
                 self._serve_asset(path[1:], "text/javascript; charset=utf-8")
                 return
             if path == "/style.css":

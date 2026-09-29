@@ -10,7 +10,7 @@
   }
   function mount(options) {
     let selected = null, record = null, editing = false, busy = false, generation = 0, loading = false;
-    let aliasInput, noticeInput, status, revisionSeen = 0;
+    let aliasInput, noticeInput, status, revisionSeen = 0, editOnLoad = false;
     const node = (tag, text, className = '') => {
       const result = document.createElement(tag); result.textContent = text; result.className = className; return result;
     };
@@ -18,7 +18,7 @@
     function leave() {
       if (busy) return false;
       if (dirty() && !window.confirm('项目资料尚未保存，确定放弃本次修改？')) return false;
-      generation++; selected = null; record = null; editing = false; loading = false;
+      generation++; selected = null; record = null; editing = false; loading = false; editOnLoad = false;
       return true;
     }
     function message(text, error = false) {
@@ -93,13 +93,16 @@
       try {
         const result = await options.request(`/api/projects/profile?${new URLSearchParams({project_id: selected.id})}`);
         if (token !== generation) return;
-        record = result; revisionSeen = record.revision; render();
+        record = result; revisionSeen = record.revision;
+        const focusEditor = editOnLoad; editing = editOnLoad; editOnLoad = false; render();
+        if (focusEditor) aliasInput.focus();
       } catch (err) { if (token === generation) message(err.message, true); }
       finally { if (token === generation) loading = false; }
     }
-    function open(project) {
+    function open(project, edit = false) {
       if (!leave()) return;
       selected = project; revisionSeen = project.revision || 0;
+      editOnLoad = edit;
       options.show(project); load();
     }
     function sync(projects) {

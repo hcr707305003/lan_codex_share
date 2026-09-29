@@ -288,7 +288,7 @@ class LanSessionHub:
                     try:
                         profile = self.profiles.get(key)
                         project.update(alias=profile['alias'], revision=profile['revision'],
-                                       has_notice=bool(profile['notice_markdown']))
+                                       has_notice=bool(profile['notice_markdown'].strip()))
                         project['name'] = profile['alias'] or project['name']
                     except ValueError:
                         project['profile_error'] = True

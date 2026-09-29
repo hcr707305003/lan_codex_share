@@ -1137,6 +1137,7 @@ function render(snapshot) {
   if (thread.cwd) workspaceName.textContent = String(thread.cwd).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '工作区';
   const currentProject = (snapshot.projects || []).find(project => (project.sessions || []).some(session => session.thread_id === threadId));
   if (currentProject) workspaceName.textContent = currentProject.name;
+  sessionNotice.update(threadId, currentProject);
   connectionPill.className = `connection-pill ${processing ? 'processing' : connection}`;
   connectionLabel.textContent = released ? '已释放' : connection !== 'connected' ? '连接断开' : processing ? 'Codex 处理中' : '已连接';
   processingBanner.hidden = !processing;
@@ -1531,6 +1532,7 @@ function selectSession(next) {
   renderPreviews();
   taskNotifications.reset();
   selectedSessionId = next;
+  sessionNotice.update(next, null);
   selectionGeneration += 1;
   refreshController?.abort();
   historyTimeline.reset();
@@ -1568,6 +1570,21 @@ const projectProfiles = LanProfiles.mount({
     filePreview.setAttribute('aria-label', '项目资料与文件预览');
     filePreview.setAttribute('aria-hidden', 'false'); appShell.classList.add('preview-open');
     resetOuterLayoutScroll(); filePreviewBody.focus({preventScroll: true});
+  },
+});
+
+const sessionNotice = LanNotice.mount({
+  root: document.getElementById('session-notice'), toggle: document.getElementById('session-notice-toggle'),
+  body: document.getElementById('session-notice-body'), status: document.getElementById('session-notice-status'),
+  retry: document.getElementById('session-notice-retry'), edit: document.getElementById('session-notice-edit'),
+  request: fetchHistoryJson, markdown: renderMarkdown,
+  editProject: project => projectProfiles.open(project, true),
+  layout: change => {
+    const top = timeline.scrollTop;
+    const following = timelineBottomDistance() < 2;
+    change();
+    timeline.scrollTop = following ? timeline.scrollHeight : top;
+    syncScrollToBottomButton();
   },
 });
 

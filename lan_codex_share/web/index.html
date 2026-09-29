@@ -126,6 +126,18 @@
         </div>
       </header>
 
+      <section class="session-notice" id="session-notice" aria-label="项目公告" hidden>
+        <div class="session-notice-heading">
+          <button id="session-notice-toggle" type="button" aria-expanded="false" aria-controls="session-notice-body">
+            <svg aria-hidden="true"><use href="#i-chevron"></use></svg><span>项目公告</span>
+          </button>
+          <button id="session-notice-edit" type="button" aria-label="编辑项目公告">编辑</button>
+        </div>
+        <p id="session-notice-status" role="status" hidden></p>
+        <button id="session-notice-retry" type="button" hidden>重试读取公告</button>
+        <div class="session-notice-body profile-markdown" id="session-notice-body" role="region" aria-label="公告内容" tabindex="0" hidden></div>
+      </section>
+
       <div class="timeline-shell">
         <section class="timeline" id="timeline" role="feed" aria-label="Codex 会话内容">
           <div class="initial-loading" id="initial-loading">
@@ -242,6 +254,7 @@
       <footer><button id="task-cancel" type="button">取消</button><button id="task-submit" class="task-primary" type="submit">添加到共享任务</button></footer>
     </form>
   </dialog>
+  <script src="/notice.js" defer></script>
   <script src="/profiles.js" defer></script>
   <script src="/tasks.js" defer></script>
   <script src="/realtime.js" defer></script>
