@@ -47,6 +47,9 @@ class SessionListEditor(QWidget):
                 raise ValueError('session_id 必须是字符串。')
             values = [value.strip()] if value.strip() else []
             mode = 'selected' if values else 'auto'
+        mode = data.get('session_mode', mode)
+        if mode not in ('selected', 'all', 'auto'):
+            raise ValueError('session_mode 必须是 selected、all 或 auto')
         self._mode = mode
         self._modified = False
         layout = QVBoxLayout(self)
@@ -115,13 +118,11 @@ class SessionListEditor(QWidget):
     def changes(self):
         if self.input.toPlainText().strip():
             raise ValueError('还有未添加的 Session ID，请先添加到列表或清空输入。')
-        if self._mode == 'selected' and not self.values():
-            raise ValueError('指定会话至少需要一个 ID；如需共享全部，请明确切换模式。')
         if not self._modified:
             return {}, ()
         if self._mode == 'auto':
-            return {}, ('session_ids', 'session_id')
-        return {'session_ids': self.values() if self._mode == 'selected' else []}, ('session_id',)
+            return {'session_mode': 'auto'}, ('session_ids', 'session_id')
+        return {'session_mode': self._mode, 'session_ids': self.values() if self._mode == 'selected' else []}, ('session_id',)
 
     def mark_applied(self):
         self._modified = False

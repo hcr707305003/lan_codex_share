@@ -317,16 +317,16 @@ function renderProjectNavigation(snapshot, selected) {
       });
       row.append(button);
       const connection = String(session.connection || '');
-      if (connection === 'connected' || connection === 'released') {
-        const reconnect = connection === 'released';
+      if (id) {
+        const reconnect = false;
         const action = el('button', 'session-connection-action');
         action.type = 'button';
         action.dataset.action = reconnect ? 'reconnect' : 'release';
         const blocked = !reconnect && (session.status === 'processing' || Number(session.queue_size || 0) > 0);
         action.disabled = blocked;
         action.title = blocked
-          ? '任务与队列结束后才可释放 Session'
-          : reconnect ? '重新连接 Session' : '释放 Session';
+          ? '任务与队列结束后才可移出共享'
+          : '移出共享并释放 Session';
         action.setAttribute('aria-label', `${action.title}：${name}`);
         action.append(icon(reconnect ? 'link' : 'unlink'));
         action.addEventListener('click', event => {
@@ -350,11 +350,17 @@ function renderProjectNavigation(snapshot, selected) {
 
 function renderSessionSelector(snapshot) {
   const selected = String(snapshot.selected_session_id || snapshot.thread_id || '');
+  if (selected !== (selectedSessionId || '')) {
+    sessionDrafts.set(selectedSessionId, {text: input.value, files: [...selectedFiles]});
+    const draft = sessionDrafts.get(selected);
+    input.value = draft?.text || ''; selectedFiles = [...(draft?.files || [])]; renderPreviews();
+  }
   renderProjectNavigation(snapshot, selected);
-  if (selected) {
+  {
     selectedSessionId = selected;
     const url = new URL(window.location.href);
-    url.searchParams.set('session', selected);
+    if (selected) url.searchParams.set('session', selected);
+    else url.searchParams.delete('session');
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   }
 }
@@ -1145,14 +1151,14 @@ function render(snapshot) {
   const queueSize = Number(snapshot.queue_size || 0);
   queueNode.textContent = `队列 ${queueSize}`;
   clearQueueButton.disabled = queueSize === 0;
-  releaseSessionButton.hidden = released;
-  releaseSessionButton.disabled = connection !== 'connected' || processing || queueSize > 0;
-  reconnectSessionButton.hidden = !released;
+  releaseSessionButton.hidden = !threadId;
+  releaseSessionButton.disabled = !threadId || processing || queueSize > 0;
+  reconnectSessionButton.hidden = true;
   reconnectSessionButton.disabled = !released;
   resyncButton.disabled = released || processing;
   cancelButton.disabled = released;
-  input.disabled = released;
-  imageInput.disabled = released;
+  input.disabled = released || !threadId;
+  imageInput.disabled = released || !threadId;
   input.placeholder = released ? 'Session 已释放，重新连接后可发送消息' : '给 Codex 发送消息';
   composer.classList.toggle('session-released', released);
   renderModelControls(snapshot, processing, queueSize);
@@ -1369,14 +1375,16 @@ async function bootstrapAuthentication() {
 }
 
 async function changeSessionConnection(sessionId, reconnect, button) {
+  if (!reconnect && !window.confirm('移出共享会同时释放占用，并从配置名单删除。真实会话和历史会保留，是否继续？')) return;
   button.disabled = true;
   button.setAttribute('aria-busy', 'true');
   try {
-    const path = reconnect ? '/api/session/reconnect' : '/api/session/release';
-    const result = await mutateForSession(path, sessionId);
-    const changed = reconnect ? result.reconnected : result.released;
+    const path = reconnect ? '/api/session/reconnect' : '/api/sessions/remove';
+    const extra = reconnect ? {} : await prepareSharedChange();
+    const result = await mutateForSession(path, sessionId, extra);
+    const changed = reconnect ? result.reconnected : result.removed;
     setNotice(changed
-      ? reconnect ? 'Session 已重新连接。' : 'Session 已释放，可在本机 Codex 客户端中打开。'
+      ? reconnect ? 'Session 已重新连接。' : 'Session 已释放并移出共享，配置已保存。'
       : reconnect ? 'Session 已经处于连接状态。' : 'Session 已经释放。');
     await refresh();
   } catch (error) {
@@ -1606,9 +1614,20 @@ const sessionNotice = LanNotice.mount({
 new ResizeObserver(positionNotice).observe(document.querySelector('.main-panel'));
 window.addEventListener('resize', positionNotice);
 
+async function prepareSharedChange() {
+  const state = await fetchHistoryJson('/api/sessions/management');
+  const confirmed = state.mode !== 'selected';
+  if (confirmed && !window.confirm('此操作会将当前共享名单固定为“指定会话”，不再自动发现全部会话。是否继续？')) throw new Error('已取消共享名单修改');
+  if (state.legacy_session_ids.length) {
+    const include = window.confirm(`发现 ${state.legacy_session_ids.length} 个旧版共享记录。确定：导入配置；取消：仅保留当前配置名单。`);
+    await mutate('/api/sessions/migrate', {include, confirm_selected: confirmed});
+  }
+  return {confirm_selected: confirmed};
+}
+
 LanTasks.mount({
   request: fetchHistoryJson,
-  mutate: (path, payload) => mutateForSession(path, payload.session_id || null, payload),
+  mutate: async (path, payload) => mutateForSession(path, payload.session_id || null, {...payload, ...await prepareSharedChange()}),
   current: () => ({cwd: latestSnapshot?.thread?.cwd}),
   canSubmit: () => {
     if (!appAuthenticated) { setNotice('请先登录。', true); return false; }

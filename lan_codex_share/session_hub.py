@@ -28,8 +28,6 @@ class LanSessionHub:
             raise ValueError("目录模式需要 catalog_client 和 service_factory")
         if self._catalog_mode and self._services:
             raise ValueError("目录模式不能同时传入静态 Session 服务")
-        if not self._services and not self._catalog_mode:
-            raise ValueError("至少需要一个 Session 服务")
         self.logger = logger
         self._services_by_id: dict[str, Any] = {}
         self._added_by_id: dict[str, dict[str, Any]] = {}
@@ -42,7 +40,8 @@ class LanSessionHub:
         self._default_session_id: str | None = None
         self._subscribers: set[queue.Queue[int]] = set()
         self._lock = threading.RLock()
-        self._service_create_lock = threading.Lock()
+        self._service_create_lock = threading.RLock()
+        self._fixed_ids = None
         self._version = 0
         self._refresh_seconds = max(0.1, float(refresh_seconds))
         self._stop = threading.Event()
@@ -54,7 +53,36 @@ class LanSessionHub:
     def thread_ids(self) -> tuple[str, ...]:
         with self._lock:
             base = self._catalog_by_id if self._catalog_mode else self._services_by_id
-            return tuple(dict.fromkeys((*base, *self._added_by_id)))
+            return tuple(sid for sid in dict.fromkeys((*base, *self._added_by_id))
+                         if self._fixed_ids is None or sid in self._fixed_ids)
+
+    def fix_membership(self, ids):
+        with self._lock:
+            self._fixed_ids = set(ids)
+            if self._default_session_id not in self.thread_ids:
+                self._default_session_id = next(iter(self.thread_ids), None)
+
+    def remove_shared(self, sid, source_ip, persist, remaining):
+        with self._service_create_lock:
+            with self._lock:
+                service = self._services_by_id.get(sid)
+                metadata = self._catalog_by_id.get(sid) or self._added_by_id.get(sid) or {}
+            if service is not None:
+                service.release_session(source_ip)
+            elif metadata.get('status') == 'active' or (isinstance(metadata.get('status'), dict) and metadata['status'].get('type') == 'active'):
+                raise ValueError('任务执行中，暂时不能移出共享')
+            persist()  # On failure keep the released service visible for retry.
+            with self._lock:
+                self._services_by_id.pop(sid, None)
+                self._added_by_id.pop(sid, None)
+                self._catalog_by_id.pop(sid, None)
+                self._session_errors.pop(sid, None)
+                self.fix_membership(remaining)
+            if service is not None:
+                service.close()
+                if service in self._services:
+                    self._services.remove(service)
+            self._broadcast()
 
     def configure_tasks(self, tasks, factory) -> None:
         self.tasks = tasks
@@ -128,7 +156,7 @@ class LanSessionHub:
             mapped[thread_id] = service
         with self._lock:
             self._services_by_id = mapped
-            self._default_session_id = next(iter(mapped))
+            self._default_session_id = next(iter(mapped), None)
         self._restore_tasks()
         self._broadcast()
 
@@ -138,12 +166,18 @@ class LanSessionHub:
         requested = session_id.strip() if isinstance(session_id, str) else ""
         with self._lock:
             selected = requested or self._default_session_id
+            if self._fixed_ids is not None and selected not in self._fixed_ids:
+                raise ValueError('指定的 Session 不在共享列表中')
             allowed = self._catalog_by_id if self._catalog_mode else self._services_by_id
             if not selected or (selected not in allowed and selected not in self._services_by_id and selected not in self._added_by_id):
                 raise ValueError("指定的 Session 不在共享列表中")
             return selected
 
     def _service(self, session_id: Any = None):
+        with self._service_create_lock:
+            return self._service_locked(session_id)
+
+    def _service_locked(self, session_id: Any = None):
         selected = self.resolve_session_id(session_id)
         with self._lock:
             service = self._services_by_id.get(selected)
@@ -186,7 +220,9 @@ class LanSessionHub:
             return selected, service
 
     def snapshot(self, session_id: Any = None, history_limit: int | None = None, before: str | None = None) -> dict[str, Any]:
-        if self._catalog_mode and session_id is None:
+        if self._fixed_ids is not None and isinstance(session_id, str) and session_id not in self.thread_ids:
+            session_id = None
+        if session_id is None:
             with self._lock:
                 if self._default_session_id is None:
                     return self._empty_snapshot()
@@ -241,6 +277,8 @@ class LanSessionHub:
                 errors = dict(self._session_errors)
             summaries: list[dict[str, Any]] = []
             for thread_id, entry in entries:
+                if self._fixed_ids is not None and thread_id not in self._fixed_ids:
+                    continue
                 service = services.get(thread_id)
                 if service is not None:
                     value = deepcopy(service.summary())
@@ -268,6 +306,8 @@ class LanSessionHub:
             services = list(self._services_by_id.items())
         summaries: list[dict[str, Any]] = []
         for thread_id, service in services:
+            if self._fixed_ids is not None and thread_id not in self._fixed_ids:
+                continue
             value = deepcopy(service.summary())
             value["thread_id"] = thread_id
             summaries.append(value)
@@ -323,6 +363,8 @@ class LanSessionHub:
             if thread_id and thread_id not in mapped:
                 mapped[thread_id] = dict(raw)
         with self._lock:
+            if self._fixed_ids is not None:
+                mapped = {sid: row for sid, row in mapped.items() if sid in self._fixed_ids}
             changed = mapped != self._catalog_by_id or self._catalog_error is not None
             self._catalog_by_id = mapped
             self._catalog_error = None
@@ -374,10 +416,11 @@ class LanSessionHub:
                 self._set_catalog_error(exc)
 
     def submit(self, session_id: Any, text: str, images: list[dict[str, str]], source_ip: str, *, documents=None) -> str:
-        service = self._service(session_id)[1]
-        if documents:
-            return service.submit(text, images, source_ip, documents=documents)
-        return service.submit(text, images, source_ip)
+        with self._service_create_lock:
+            service = self._service(session_id)[1]
+            if documents:
+                return service.submit(text, images, source_ip, documents=documents)
+            return service.submit(text, images, source_ip)
 
     def cancel_queued(self, session_id: Any, message_id: str, source_ip: str) -> bool:
         return self._service(session_id)[1].cancel_queued(message_id, source_ip)
@@ -392,7 +435,8 @@ class LanSessionHub:
         return self._service(session_id)[1].release_session(source_ip)
 
     def reconnect_session(self, session_id: Any, source_ip: str) -> bool:
-        return self._service(session_id)[1].reconnect_session(source_ip)
+        with self._service_create_lock:
+            return self._service(session_id)[1].reconnect_session(source_ip)
 
     def resync(self, session_id: Any, source_ip: str) -> bool:
         return self._service(session_id)[1].resync(source_ip)

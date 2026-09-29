@@ -72,8 +72,11 @@ def test_pending_draft_blocks_save_raw_and_reload_cancel(app, tmp_path, monkeypa
     editor.input.clear()
     editor.list.setCurrentRow(0)
     editor.remove_selected()
-    assert not page.save()
-    assert path.read_text(encoding='utf-8') == original
+    assert page.save()
+    from lan_codex_share.lan_config import load_lan_config
+    config = load_lan_config(path)
+    assert config.session_mode == 'selected' and config.session_ids == ()
+    assert not config.discover_all_sessions
     page.close()
 
 

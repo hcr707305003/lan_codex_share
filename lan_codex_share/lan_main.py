@@ -161,8 +161,11 @@ def _build_session_hub(config, runtime: Path, image_store: ImageStore, document_
         return _chat_service(config, runtime, image_store, entry['id'], workspace=Path(raw).resolve(),
                              label=entry.get('name') or 'Codex Session', document_store=document_store)
 
+    from .config_write import SessionConfigStore
     tasks = SessionTasks(runtime / 'shared_sessions.json', client, config.workspace,
-                         hub.register_session, lambda: hub.thread_ids)
+                         hub.register_session, lambda: hub.thread_ids,
+                         config_store=SessionConfigStore(config.config_path) if config.config_path else None,
+                         hub=hub)
     hub.configure_tasks(tasks, factory)
     return hub
 
@@ -206,7 +209,7 @@ def _initial_session_hub(config, runtime: Path, image_store: ImageStore, documen
         )
 
     configured_sessions: tuple[str | None, ...] = (
-        config.session_ids if config.session_ids else (None,)
+        (None,) if config.auto_session else (config.session_ids or ())
     )
     services = [
         _chat_service(

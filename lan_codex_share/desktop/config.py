@@ -9,6 +9,7 @@ import tomlkit
 import yaml
 
 from ..lan_config import load_lan_config
+from ..config_write import config_lock
 from .theme import normalize_theme
 
 
@@ -105,6 +106,10 @@ class ConfigDocument:
         return data
 
     def save(self, text: str) -> None:
+        with config_lock(self.path):
+            self._save_locked(text)
+
+    def _save_locked(self, text: str) -> None:
         self.validate(text)
         if _digest(self.path) != self.digest:
             raise ValueError("文件已被外部修改，请重新加载或另存为")

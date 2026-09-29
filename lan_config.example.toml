@@ -1,6 +1,7 @@
 workspace = "../workspace"
-# 空数组共享全部未归档主 Session，并在网页中按项目分组。
-# 填入 ID 数组则只共享指定 Session；删除本配置项则使用单会话自动模式。
+# all：自动发现全部；selected：仅共享 session_ids（空数组不共享）；auto：自动单会话。
+# 网页增删时会确认固定为 selected，并写回此配置。旧配置未写 session_mode 时维持原语义。
+session_mode = "all"
 session_ids = []
 permission_mode = "danger-full-access"
 # 留空时不需要密码；设置非空字符串后，访问网页必须先登录。

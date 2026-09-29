@@ -26,12 +26,14 @@ def metadata(raw):
 
 
 class SessionTasks:
-    def __init__(self, path, client, workspace, register, shared_ids):
+    def __init__(self, path, client, workspace, register, shared_ids, *, config_store=None, hub=None):
         self.path = Path(path)
         self.client = client
         self.workspace = Path(workspace).resolve()
         self.register = register
         self.shared_ids = shared_ids
+        self.config_store = config_store
+        self.hub = hub
         self._lock = threading.RLock()
         self._cache_lock = threading.Lock()
         self._cache = []
@@ -135,6 +137,8 @@ class SessionTasks:
     def restore(self):
         with self._lock:
             self._check()
+            if self.config_store:
+                return  # Runtime IDs are migration candidates, not a second allowlist.
             for sid in self._state['session_ids']:
                 try:
                     entry = self._read(sid)
@@ -142,18 +146,62 @@ class SessionTasks:
                     entry = {'id': sid, 'name': sid, 'error': str(exc)}
                 self.register(entry)
 
-    def add(self, value):
+    def management(self):
+        with self._lock:
+            self._check()
+            mode = self.config_store.read()[0] if self.config_store else 'selected'
+            legacy = [] if self._state.get('config_migrated') else [sid for sid in self._state['session_ids'] if sid not in self.shared_ids()]
+            return {'mode': mode, 'legacy_session_ids': legacy}
+
+    def migrate(self, include, confirmed=False):
+        if not self.config_store or type(include) is not bool:
+            raise ValueError('迁移参数无效')
+        with self._lock:
+            self._check()
+            if self._state.get('config_migrated'):
+                return {'migrated': True}
+            entries = [self._read(sid) for sid in self.management()['legacy_session_ids']] if include else []
+            if entries:
+                with self.config_store.mutation(self.shared_ids(), confirmed) as (ids, save):
+                    values = list(dict.fromkeys(ids + [e['id'] for e in entries]))
+                    save(values)
+                self.hub.fix_membership(values)
+                for entry in entries:
+                    self.register(entry)
+            data = deepcopy(self._state); data['config_migrated'] = True
+            self._write(data)
+            return {'migrated': True}
+
+    def remove(self, value, source_ip, confirmed=False):
+        sid = session_id(value)
+        if not self.config_store:
+            raise ValueError('当前服务未启用配置共享管理')
+        with self._lock:
+            self._check()
+            with self.config_store.mutation(self.shared_ids(), confirmed) as (ids, save):
+                values = [item for item in ids if item != sid]
+                self.hub.remove_shared(sid, source_ip, lambda: save(values), values)
+            return {'removed': True}
+
+    def add(self, value, confirmed=False):
         sid = session_id(value)
         with self._lock:
             self._check()
             if sid in self.shared_ids():
                 return {'session_id': sid, 'already_shared': True}
             entry = self._read(sid)
-            return self._persist_entry(entry)
+            return self._persist_entry(entry, confirmed)
 
-    def _persist_entry(self, entry):
+    def _persist_entry(self, entry, confirmed=False):
         sid = entry['id']
         already_shared = sid in self.shared_ids()
+        if self.config_store:
+            with self.config_store.mutation(self.shared_ids(), confirmed) as (ids, save):
+                values = list(dict.fromkeys(ids + [sid]))
+                save(values)
+            self.hub.fix_membership(values)
+            self.register(entry)
+            return {'session_id': sid, 'already_shared': already_shared}
         data = deepcopy(self._state)
         if sid not in data['session_ids']:
             data['session_ids'].append(sid)
@@ -161,12 +209,15 @@ class SessionTasks:
         self.register(entry)
         return {'session_id': sid, 'already_shared': already_shared}
 
-    def create(self, project, request_id):
+    def create(self, project, request_id, confirmed=False):
         rid = session_id(request_id)
         if not isinstance(project, str) or not project.strip():
             raise ValueError('请选择项目工作目录')
         with self._lock:
             self._check()
+            if self.config_store:
+                with self.config_store.mutation(self.shared_ids(), confirmed):
+                    pass  # Reject unconfirmed mode conversion before creating a real thread.
             record = self._state['requests'].get(rid)
             if record:
                 if record['project'] != project:
@@ -175,7 +226,7 @@ class SessionTasks:
                     raise ValueError('创建结果不确定，请刷新已有会话列表确认；不会自动重复创建')
                 if record['session_id'] in self._state['session_ids'] and record['session_id'] in self.shared_ids():
                     return {'session_id': record['session_id'], 'already_shared': True}
-                return self._persist_entry(self._read(record['session_id']))
+                return self._persist_entry(self._read(record['session_id']), confirmed)
             if project not in {p['cwd'] for p in self.projects()['items']}:
                 raise ValueError('工作目录不在已有项目中或已不可用')
             if len(self._state['requests']) >= 10000:
@@ -199,7 +250,7 @@ class SessionTasks:
                 # Use the authoritative thread/start result, never create a second thread.
                 entry['cwd'] = project
                 entry['name'] = entry.get('name') or '新会话'
-                result = self._persist_entry(entry)
+                result = self._persist_entry(entry, confirmed)
             except ValueError as exc:
                 raise ValueError(f'会话已创建（{sid}），共享保存失败；请使用此 ID 添加已有会话') from exc
             return result

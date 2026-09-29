@@ -301,7 +301,7 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b"parseLocalFileTarget" in script
         assert b"/api/queue/cancel" in script
         assert b"/api/queue/clear" in script
-        assert b"/api/session/release" in script
+        assert b"/api/sessions/remove" in script
         assert b"/api/session/reconnect" in script
         assert b"changeSessionConnection" in script
         assert b"renderQueue(pending)" in script

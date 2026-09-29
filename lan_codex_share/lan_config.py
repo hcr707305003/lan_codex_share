@@ -34,6 +34,8 @@ class LanConfig:
     cloudflare_origin: str = ""
     frp_origin: str = ""
     notify_on_task_complete: bool = False
+    session_mode: str | None = None
+    config_path: Path | None = None
 
     @property
     def public_origins(self) -> tuple[str, ...]:
@@ -46,11 +48,11 @@ class LanConfig:
 
     @property
     def auto_session(self) -> bool:
-        return self.session_ids is None
+        return self.session_mode == 'auto' if self.session_mode else self.session_ids is None
 
     @property
     def discover_all_sessions(self) -> bool:
-        return self.session_ids == ()
+        return self.session_mode == 'all' if self.session_mode else self.session_ids == ()
 
 
 def load_lan_config(path: str | Path) -> LanConfig:
@@ -116,6 +118,11 @@ def load_lan_config(path: str | Path) -> LanConfig:
                 raise LanConfigError("session_id 必须是字符串")
             session_id = session_id_raw.strip()
             session_ids = (session_id,) if session_id else None
+    session_mode = data.get('session_mode')
+    if session_mode is not None and session_mode not in ('selected', 'all', 'auto'):
+        raise LanConfigError('session_mode 必须是 selected、all 或 auto')
+    if session_mode == 'selected' and session_ids is None:
+        session_ids = ()
     permission_mode_raw = data.get("permission_mode", "danger-full-access")
     if not isinstance(permission_mode_raw, str):
         raise LanConfigError("permission_mode 必须是字符串")
@@ -167,6 +174,8 @@ def load_lan_config(path: str | Path) -> LanConfig:
         log_level=str(data.get("log_level", "INFO")).upper(),
         preview_roots=tuple(preview_roots),
         session_ids=session_ids,
+        session_mode=session_mode,
+        config_path=config_path,
         permission_mode=permission_mode,
         password=password,
         public_origin=public_origin,

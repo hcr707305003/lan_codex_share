@@ -54,7 +54,7 @@ def test_add_atomic_dedup_and_copy(app, monkeypatch):
     editor.input.setPlainText('a,b\nb,c')
     editor.add_input()
     assert editor.values() == ['a', 'b', 'c']
-    assert editor.changes() == ({'session_ids': ['a', 'b', 'c']}, ('session_id',))
+    assert editor.changes() == ({'session_mode': 'selected', 'session_ids': ['a', 'b', 'c']}, ('session_id',))
     copied = []
     class Clipboard:
         def setText(self, text):
@@ -75,12 +75,11 @@ def test_modes_empty_guard_and_pending_input(app):
     editor.list.setCurrentRow(0)
     editor.remove_selected()
     assert editor.mode.currentData() == 'selected'
-    with pytest.raises(ValueError):
-        editor.changes()
+    assert editor.changes() == ({'session_mode': 'selected', 'session_ids': []}, ('session_id',))
     editor.mode.setCurrentIndex(editor.mode.findData('all'))
-    assert editor.changes() == ({'session_ids': []}, ('session_id',))
+    assert editor.changes() == ({'session_mode': 'all', 'session_ids': []}, ('session_id',))
     editor.mode.setCurrentIndex(editor.mode.findData('auto'))
-    assert editor.changes() == ({}, ('session_ids', 'session_id'))
+    assert editor.changes() == ({'session_mode': 'auto'}, ('session_ids', 'session_id'))
 
 
 def test_mode_switch_preserves_list_and_duplicate_does_not_migrate(app):

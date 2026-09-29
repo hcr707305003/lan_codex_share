@@ -12,6 +12,8 @@ from lan_codex_share.lan_store import ImageStore
 from lan_codex_share.session_hub import LanSessionHub
 from lan_codex_share.session_tasks import SessionTasks
 from lan_codex_share.project_profiles import ProjectProfiles
+from lan_codex_share.config_write import SessionConfigStore
+import json
 from tests.test_session_tasks import Client
 from tests.test_session_hub import FakeSessionService
 
@@ -52,7 +54,13 @@ def main():
                 ]} for i in range(25)]
         hub = LanSessionHub([Service(entry) for entry in entries])
         hub.profiles = ProjectProfiles(root / 'project_profiles.json')
-        tasks = SessionTasks(root / 'shared_sessions.json', client, root, hub.register_session, lambda: hub.thread_ids)
+        store = None
+        if '--config-shared' in sys.argv:
+            config_path = root / 'lan_config.toml'
+            config_path.write_text('workspace = "."\nsession_mode = "selected"\nsession_ids = ' + json.dumps([entry['id'] for entry in entries]) + '\n', encoding='utf-8')
+            store = SessionConfigStore(config_path)
+        tasks = SessionTasks(root / 'shared_sessions.json', client, root, hub.register_session, lambda: hub.thread_ids,
+                             config_store=store, hub=hub)
         hub.configure_tasks(tasks, Service)
         hub.start()
         if '--notice' in sys.argv:

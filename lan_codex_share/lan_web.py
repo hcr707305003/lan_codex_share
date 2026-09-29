@@ -276,6 +276,12 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._require_authentication()
+            if path == '/api/sessions/management':
+                tasks = getattr(self.app.service, 'tasks', None)
+                if tasks is None:
+                    raise ValueError('当前服务未启用共享管理')
+                self._json(HTTPStatus.OK, tasks.management())
+                return
             if path == '/api/projects/profile':
                 query = parse_qs(request_url.query, keep_blank_values=True)
                 self._json(HTTPStatus.OK, self.app.service.project_profile(query.get('project_id', [''])[0]))
@@ -537,12 +543,21 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, {"authenticated": True}, headers)
                 return
             self._require_authentication()
+            if path in {'/api/sessions/remove', '/api/sessions/migrate'}:
+                tasks = getattr(self.app.service, 'tasks', None)
+                if tasks is None:
+                    raise ValueError('当前服务未启用共享管理')
+                confirmed = payload.get('confirm_selected') is True
+                result = tasks.remove(payload.get('session_id'), source_ip, confirmed) if path.endswith('/remove') else tasks.migrate(payload.get('include'), confirmed)
+                self._json(HTTPStatus.OK, result)
+                return
             if path in {'/api/sessions/add', '/api/sessions/create'}:
                 tasks = getattr(self.app.service, 'tasks', None)
                 if tasks is None:
                     raise ValueError('当前服务未启用新任务管理')
-                result = tasks.add(payload.get('session_id')) if path.endswith('/add') else tasks.create(
-                    payload.get('project'), payload.get('request_id'))
+                options = {'confirmed': True} if payload.get('confirm_selected') is True else {}
+                result = tasks.add(payload.get('session_id'), **options) if path.endswith('/add') else tasks.create(
+                    payload.get('project'), payload.get('request_id'), **options)
                 self._json(HTTPStatus.OK, result)
                 return
             if path == '/api/projects/profile':
