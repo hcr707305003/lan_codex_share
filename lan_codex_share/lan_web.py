@@ -167,6 +167,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        if self.close_connection and not any(name.lower() == 'connection' for name in (headers or {})):
+            self.send_header("Connection", "close")
         for name, value in (headers or {}).items():
             self.send_header(name, value)
         self._security_headers(cache_control, frame_options=frame_options)
@@ -496,6 +498,10 @@ class LanRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self._try_proxy():
             return
+        # An early rejection must not leave unread body bytes on a reusable
+        # connection: BaseHTTPRequestHandler would parse them as a new method.
+        requested_close = self.close_connection
+        self.close_connection = True
         try:
             self._guard(mutation=True)
             length = int(self.headers.get("Content-Length", "0"))
@@ -504,8 +510,12 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             if length > self.app.max_request_bytes:
                 self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "请求内容过大")
                 return
+            raw_body = self.rfile.read(length)
+            if len(raw_body) != length:
+                raise ValueError("请求正文不完整")
+            self.close_connection = requested_close
             try:
-                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                payload = json.loads(raw_body.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ValueError("JSON 格式无效") from exc
             if not isinstance(payload, dict):

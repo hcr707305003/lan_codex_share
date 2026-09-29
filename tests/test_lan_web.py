@@ -645,6 +645,65 @@ def test_workspace_file_preview_route_and_boundary(tmp_path):
         outside.unlink(missing_ok=True)
 
 
+@pytest.mark.parametrize('rejection, expected', [
+    ('csrf', 403), ('origin', 403), ('too_large', 413),
+    ('invalid_length', 400), ('empty_length', 400),
+])
+def test_unread_post_body_closes_connection_before_next_get(tmp_path, rejection, expected):
+    app, service, server, thread = start_app(tmp_path)
+    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=2)
+    body = json.dumps({'text': '示例消息', 'images': [], 'session_id': 'thread-web'}).encode()
+    headers = {'Origin': f'http://127.0.0.1:{server.server_port}',
+               'Content-Type': 'application/json', 'X-CSRF-Token': app.csrf_token}
+    if rejection == 'csrf':
+        headers['X-CSRF-Token'] = 'stale-token'
+    elif rejection == 'origin':
+        headers['Origin'] = 'http://untrusted.example'
+    elif rejection == 'too_large':
+        app.max_request_bytes = len(body) - 1
+    else:
+        headers['Content-Length'] = 'invalid' if rejection == 'invalid_length' else '0'
+    try:
+        connection.request('POST', '/api/messages', body, headers)
+        response = connection.getresponse()
+        assert response.status == expected
+        assert response.getheader('Connection') == 'close'
+        assert response.will_close
+        response.read()
+        connection.request('GET', '/?session=thread-web')
+        response = connection.getresponse()
+        assert response.status == 200
+        response.read()
+        assert service.submitted == []
+    finally:
+        connection.close()
+        server.shutdown(); server.server_close(); thread.join(2)
+
+
+def test_consumed_post_body_keeps_connection_reusable(tmp_path):
+    app, service, server, thread = start_app(tmp_path)
+    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=2)
+    try:
+        headers = {'Origin': f'http://127.0.0.1:{server.server_port}',
+                   'Content-Type': 'application/json', 'X-CSRF-Token': app.csrf_token}
+        for body, expected in [('not-json', 400), ('{"text":"demo"}', 202)]:
+            connection.request('POST', '/api/messages', body, headers)
+            response = connection.getresponse()
+            assert response.status == expected
+            assert not response.will_close
+            response.read()
+            sock = connection.sock
+            connection.request('GET', '/')
+            response = connection.getresponse()
+            assert response.status == 200
+            response.read()
+            assert connection.sock is sock
+        assert len(service.submitted) == 1
+    finally:
+        connection.close()
+        server.shutdown(); server.server_close(); thread.join(2)
+
+
 def test_sse_sends_initial_event(tmp_path):
     app, service, server, thread = start_app(tmp_path)
     connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=2)
