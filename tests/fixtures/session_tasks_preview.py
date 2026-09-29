@@ -11,6 +11,7 @@ from lan_codex_share.lan_web import LanWebApplication
 from lan_codex_share.lan_store import ImageStore
 from lan_codex_share.session_hub import LanSessionHub
 from lan_codex_share.session_tasks import SessionTasks
+from lan_codex_share.project_profiles import ProjectProfiles
 from tests.test_session_tasks import Client
 from tests.test_session_hub import FakeSessionService
 
@@ -39,6 +40,7 @@ def main():
             client.threads.append({'id': str(uuid4()), 'name': f'示例任务 {i + 1}', 'cwd': str(other if i % 2 else root), 'updatedAt': 1790000000 + i})
         client.threads.append({'id': str(uuid4()), 'name': '<img src=x onerror=alert(1)> 安全标题', 'cwd': str(root)})
         hub = LanSessionHub([Service(client.threads[0])])
+        hub.profiles = ProjectProfiles(root / 'project_profiles.json')
         tasks = SessionTasks(root / 'shared_sessions.json', client, root, hub.register_session, lambda: hub.thread_ids)
         hub.configure_tasks(tasks, Service)
         hub.start()

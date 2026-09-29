@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-import os
 import queue
 import threading
 from typing import Any, Iterable
+from .project_profiles import project_key
 
 
 class LanSessionHub:
@@ -34,6 +34,7 @@ class LanSessionHub:
         self._services_by_id: dict[str, Any] = {}
         self._added_by_id: dict[str, dict[str, Any]] = {}
         self.tasks = None
+        self.profiles = None
         self._added_factory = None
         self._catalog_by_id: dict[str, dict[str, Any]] = {}
         self._session_errors: dict[str, str] = {}
@@ -277,18 +278,38 @@ class LanSessionHub:
         for session in self.session_summaries():
             cwd = str(session.get("cwd") or "").strip()
             project_id = str(session.get("project_id") or "").strip()
-            try:
-                canonical = str(Path(cwd).expanduser().resolve()) if cwd else ''
-            except (OSError, ValueError):
-                canonical = cwd
-            key = os.path.normcase(canonical) or project_id or "unassigned"
+            key = project_key(cwd) or project_id or "unassigned"
             project = groups.get(key)
             if project is None:
                 name = Path(cwd).name if cwd else "未分配项目"
                 project = {"id": key, "name": name or cwd, "cwd": cwd, "sessions": []}
+                project['original_name'] = project['name']
+                if self.profiles and cwd:
+                    try:
+                        profile = self.profiles.get(key)
+                        project.update(alias=profile['alias'], revision=profile['revision'],
+                                       has_notice=bool(profile['notice_markdown']))
+                        project['name'] = profile['alias'] or project['name']
+                    except ValueError:
+                        project['profile_error'] = True
                 groups[key] = project
             project["sessions"].append(session)
         return list(groups.values())
+
+    def project_profile(self, project_id, changes=None):
+        if not self.profiles:
+            raise ValueError('当前服务未启用项目资料')
+        project = next((p for p in self.project_summaries()
+                        if p['id'] == project_id and p['cwd']), None)
+        if project is None:
+            raise ValueError('指定项目不在共享列表中或没有工作目录')
+        if changes is None:
+            record = self.profiles.get(project_id)
+        else:
+            record = self.profiles.save(project_id, changes.get('alias'),
+                                        changes.get('notice_markdown'), changes.get('revision'))
+            self._broadcast()
+        return dict(record, project_id=project_id, cwd=project['cwd'], original_name=project['original_name'])
 
     def refresh_catalog(self) -> None:
         if not self._catalog_mode:

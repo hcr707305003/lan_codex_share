@@ -270,7 +270,7 @@ function renderProjectNavigation(snapshot, selected) {
     {id: 'shared', name: '共享会话', sessions: snapshot.sessions || []},
   ];
   const signature = JSON.stringify([selected, projects.map(project => [
-    project.id, project.name, project.cwd,
+    project.id, project.name, project.cwd, project.revision,
     (project.sessions || []).map(session => [
       session.thread_id, session.name, session.status, session.connection, session.queue_size, session.error,
     ]),
@@ -288,6 +288,13 @@ function renderProjectNavigation(snapshot, selected) {
     summary.append(icon('chevron'));
     summary.append(el('span', 'project-heading', project.name || '未分配项目'));
     summary.append(el('span', 'project-count', String(sessions.length)));
+    if (project.cwd) {
+      const info = el('button', 'project-info-button', '说明');
+      info.type = 'button'; info.title = `项目说明：${project.name}`;
+      info.setAttribute('aria-label', info.title);
+      info.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); projectProfiles.open(project); closeSidebar(); });
+      summary.append(info);
+    }
     details.append(summary);
     const sessionNodes = el('div', 'project-sessions');
     for (const session of sessions) {
@@ -639,6 +646,9 @@ function resetOuterLayoutScroll() {
 }
 
 async function openFilePreview(reference) {
+  if (!projectProfiles.leave()) return;
+  document.getElementById('file-preview-refresh').hidden = false;
+  filePreviewDownload.hidden = false;
   if (!appShell.classList.contains('preview-open')) {
     const active = document.activeElement;
     previewReturnFocus = active instanceof HTMLElement && !filePreview.contains(active) ? active : null;
@@ -710,6 +720,7 @@ async function openFilePreview(reference) {
 }
 
 function closeFilePreview() {
+  if (!projectProfiles.leave()) return;
   if (!appShell.classList.contains('preview-open')) return;
   previewRequestId += 1;
   const returnFocus = previewReturnFocus;
@@ -1112,6 +1123,7 @@ function render(snapshot) {
   taskNotifications.update(snapshot);
   latestSnapshot = snapshot;
   renderSessionSelector(snapshot);
+  projectProfiles.sync(snapshot.projects);
   const thread = snapshot.thread || {};
   const connection = snapshot.connection || 'disconnected';
   const processing = snapshot.status === 'processing';
@@ -1123,6 +1135,8 @@ function render(snapshot) {
   sidebarThread.textContent = threadId ? shortId(threadId) : '尚未连接';
   workspacePath.textContent = thread.cwd || '真实 Codex Session';
   if (thread.cwd) workspaceName.textContent = String(thread.cwd).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '工作区';
+  const currentProject = (snapshot.projects || []).find(project => (project.sessions || []).some(session => session.thread_id === threadId));
+  if (currentProject) workspaceName.textContent = currentProject.name;
   connectionPill.className = `connection-pill ${processing ? 'processing' : connection}`;
   connectionLabel.textContent = released ? '已释放' : connection !== 'connected' ? '连接断开' : processing ? 'Codex 处理中' : '已连接';
   processingBanner.hidden = !processing;
@@ -1540,6 +1554,22 @@ function selectSession(next) {
 }
 
 sessionSelect.addEventListener('change', () => selectSession(sessionSelect.value));
+
+const projectProfiles = LanProfiles.mount({
+  body: filePreviewBody, title: filePreviewTitle, path: filePreviewPath,
+  request: fetchHistoryJson, mutate, markdown: renderMarkdown, changed: scheduleRefresh,
+  show: project => {
+    const active = document.activeElement;
+    previewReturnFocus = active instanceof HTMLElement && !filePreview.contains(active) ? active : null;
+    previewRequestId += 1; currentFileReference = null; setFileDownload();
+    document.getElementById('file-preview-refresh').hidden = true;
+    filePreviewDownload.hidden = true;
+    filePreviewTitle.textContent = project.name || '项目资料'; filePreviewPath.textContent = project.cwd;
+    filePreview.setAttribute('aria-label', '项目资料与文件预览');
+    filePreview.setAttribute('aria-hidden', 'false'); appShell.classList.add('preview-open');
+    resetOuterLayoutScroll(); filePreviewBody.focus({preventScroll: true});
+  },
+});
 
 LanTasks.mount({
   request: fetchHistoryJson,

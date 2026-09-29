@@ -196,6 +196,28 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .project-group > summary svg { width: 14px; height: 14px; flex: 0 0 auto; transition: transform .16s ease; }
 .project-group[open] > summary svg { transform: rotate(180deg); }
 .project-heading { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
+.project-info-button { flex-shrink: 0; border: 0; background: transparent; color: var(--text-soft); cursor: pointer; font-size: 11px; padding: 8px 5px; border-radius: 5px; }
+.project-info-button:hover { background: var(--surface-hover); color: var(--text); }
+.project-info-button:focus-visible, .project-profile :focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.project-profile { padding: 20px; min-width: 0; display: flex; flex-direction: column; gap: 14px; overflow-wrap: anywhere; }
+.project-profile p { margin: 0; }
+.profile-hint, .profile-status { color: var(--text-soft); font-size: 12px; line-height: 1.7; }
+.profile-status.error { color: var(--danger); }
+.project-profile label { font-size: 13px; font-weight: 600; }
+.project-profile input, .project-profile textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 14px; }
+.project-profile textarea { min-height: 260px; resize: vertical; line-height: 1.7; }
+.profile-toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+.project-profile button { align-self: flex-start; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer; }
+.project-profile button:hover:not(:disabled) { background: var(--surface-hover); }
+.project-profile button:disabled { opacity: .5; cursor: default; }
+.project-profile .profile-save { background: var(--accent); color: var(--accent-text); }
+.project-profile .profile-save:hover:not(:disabled) { background: var(--text-soft); }
+.profile-markdown { font-size: 14px; line-height: 1.8; min-width: 0; }
+.profile-markdown p { margin: 0 0 12px; }
+.profile-markdown a { color: var(--info); }
+.profile-markdown pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.profile-empty { padding: 24px 0; color: var(--text-soft); font-size: 14px; line-height: 1.8; }
+@media (max-width: 720px) { .project-profile { padding: 16px; } .project-profile button, .project-info-button { min-height: 44px; } }
 .project-count { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
 .project-sessions { display: grid; gap: 2px; padding: 2px 0 5px 10px; }
 .task-entry-row { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 36px; align-items: center; gap: 2px; }
@@ -568,6 +590,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .file-preview-heading strong { font-size: 13px; }
 .file-preview-heading span { margin-top: 2px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
 .file-preview-actions { display: flex; align-items: center; gap: 2px; }
+.file-preview-actions [hidden], .project-profile [hidden] { display: none !important; }
 .file-preview-body { min-width: 0; min-height: 0; overflow: auto; outline: 0; }
 .file-preview-state { display: grid; min-height: 45vh; place-items: center; padding: 24px; color: var(--muted); text-align: center; }
 .file-preview-state.error { color: var(--danger); }

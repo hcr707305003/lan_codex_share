@@ -92,7 +92,7 @@ class LanWebApplication:
         self.auth_lock = threading.Lock()
         self.logger = logger or logging.getLogger(__name__)
         self.web_root = Path(__file__).with_name("web")
-        missing_assets = [name for name in ("index.html", "app.js", "history.js", "realtime.js", "notifications.js", "tasks.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
+        missing_assets = [name for name in ("index.html", "app.js", "history.js", "realtime.js", "notifications.js", "tasks.js", "profiles.js", "style.css", "proxy-client.js") if not (self.web_root / name).is_file()]
         if missing_assets:
             raise FileNotFoundError(f"Web 静态资源不完整：{', '.join(missing_assets)}")
         self.static_assets = StaticAssets(self.web_root)
@@ -248,7 +248,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_bytes(200, asset.body, asset.mime, {"ETag": asset.etag}, cache_control=cache)
                 return
-            if path in {"/app.js", "/history.js", "/realtime.js", "/notifications.js", "/tasks.js"}:
+            if path in {"/app.js", "/history.js", "/realtime.js", "/notifications.js", "/tasks.js", "/profiles.js"}:
                 self._serve_asset(path[1:], "text/javascript; charset=utf-8")
                 return
             if path == "/style.css":
@@ -274,6 +274,10 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._require_authentication()
+            if path == '/api/projects/profile':
+                query = parse_qs(request_url.query, keep_blank_values=True)
+                self._json(HTTPStatus.OK, self.app.service.project_profile(query.get('project_id', [''])[0]))
+                return
             if path in {'/api/sessions/candidates', '/api/sessions/projects'}:
                 tasks = getattr(self.app.service, 'tasks', None)
                 if tasks is None:
@@ -281,6 +285,13 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 query = parse_qs(request_url.query, keep_blank_values=True)
                 result = tasks.projects() if path.endswith('/projects') else tasks.candidates(
                     query.get('q', [''])[0], query.get('cursor', [None])[0])
+                if path.endswith('/projects') and getattr(self.app.service, 'profiles', None):
+                    from .project_profiles import project_key
+                    for item in result.get('items', []):
+                        try:
+                            item['name'] = self.app.service.profiles.get(project_key(item['cwd']))['alias'] or item['name']
+                        except ValueError:
+                            pass
                 self._json(HTTPStatus.OK, result)
                 return
             if path == "/proxy-client.js":
@@ -522,6 +533,15 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                     raise ValueError('当前服务未启用新任务管理')
                 result = tasks.add(payload.get('session_id')) if path.endswith('/add') else tasks.create(
                     payload.get('project'), payload.get('request_id'))
+                self._json(HTTPStatus.OK, result)
+                return
+            if path == '/api/projects/profile':
+                from .project_profiles import ProfileConflict
+                try:
+                    result = self.app.service.project_profile(payload.get('project_id'), payload)
+                except ProfileConflict as exc:
+                    self._error(HTTPStatus.CONFLICT, str(exc))
+                    return
                 self._json(HTTPStatus.OK, result)
                 return
             session_id = self.app.service.resolve_session_id(payload.get("session_id"))

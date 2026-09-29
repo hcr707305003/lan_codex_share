@@ -29,7 +29,8 @@ const reference = {documentId: 'id', sessionId: 's', name: 'example.docx', size:
 
 function setup() {
   const context = vm.createContext({URLSearchParams, HTMLElement: Element,
-    document: {createElement: tag => new Element(tag), createTextNode: text => new Element('', text)},
+    document: {createElement: tag => new Element(tag), createTextNode: text => new Element('', text), getElementById: () => new Element()},
+    projectProfiles: {leave: () => true},
     requestAnimationFrame: fn => fn(), previewRequestId: 0, currentFileReference: null, previewReturnFocus: null,
     handleUnauthorized: () => false, selectedSessionId: 's', latestSnapshot: null,
     displayTime: () => '', statusValue: () => '', stateLabel: () => '',

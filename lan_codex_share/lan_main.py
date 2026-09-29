@@ -25,6 +25,7 @@ from .document_store import DocumentStore, MAX_TOTAL_BYTES
 from .lan_web import LanWebApplication
 from .session_hub import LanSessionHub
 from .session_tasks import SessionTasks
+from .project_profiles import ProjectProfiles
 from .session_projection import SessionProjection
 from .state_store import StateStore
 from .share_instance import write_instance, remove_instance
@@ -146,6 +147,7 @@ def _chat_service(
 
 def _build_session_hub(config, runtime: Path, image_store: ImageStore, document_store=None) -> LanSessionHub:
     hub = _initial_session_hub(config, runtime, image_store, document_store)
+    hub.profiles = ProjectProfiles(runtime / 'project_profiles.json')
     client = CodexClient(
         config.workspace, StateStore(runtime / 'tasks-client.json'), config.turn_timeout_seconds,
         remote_url=f'ws://127.0.0.1:{config.app_server_port}', strict_resume=True,
