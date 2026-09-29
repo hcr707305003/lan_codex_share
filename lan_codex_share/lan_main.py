@@ -24,6 +24,7 @@ from .lan_store import ImageStore
 from .document_store import DocumentStore, MAX_TOTAL_BYTES
 from .lan_web import LanWebApplication
 from .session_hub import LanSessionHub
+from .session_tasks import SessionTasks
 from .session_projection import SessionProjection
 from .state_store import StateStore
 from .share_instance import write_instance, remove_instance
@@ -144,6 +145,27 @@ def _chat_service(
 
 
 def _build_session_hub(config, runtime: Path, image_store: ImageStore, document_store=None) -> LanSessionHub:
+    hub = _initial_session_hub(config, runtime, image_store, document_store)
+    client = CodexClient(
+        config.workspace, StateStore(runtime / 'tasks-client.json'), config.turn_timeout_seconds,
+        remote_url=f'ws://127.0.0.1:{config.app_server_port}', strict_resume=True,
+        sandbox_mode=config.permission_mode,
+    )
+
+    def factory(entry):
+        raw = entry.get('cwd')
+        if not isinstance(raw, str) or not raw.strip() or not Path(raw).is_dir():
+            raise ValueError('Session 工作目录不存在')
+        return _chat_service(config, runtime, image_store, entry['id'], workspace=Path(raw).resolve(),
+                             label=entry.get('name') or 'Codex Session', document_store=document_store)
+
+    tasks = SessionTasks(runtime / 'shared_sessions.json', client, config.workspace,
+                         hub.register_session, lambda: hub.thread_ids)
+    hub.configure_tasks(tasks, factory)
+    return hub
+
+
+def _initial_session_hub(config, runtime: Path, image_store: ImageStore, document_store=None) -> LanSessionHub:
     if config.discover_all_sessions:
         catalog = CodexClient(
             config.workspace,

@@ -121,6 +121,7 @@ class LanChatService:
         return {
             "thread_id": self.thread_id,
             "name": thread.get("name") or thread.get("preview") or self.thread_id,
+            "cwd": thread.get("cwd") or str(getattr(self.codex, "workspace", "")),
             "status": self._status(connection),
             "connection": connection,
             "queue_size": self.queue_size,

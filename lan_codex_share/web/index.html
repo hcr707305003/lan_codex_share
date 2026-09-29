@@ -57,7 +57,7 @@
           <svg><use href="#i-close"></use></svg>
         </button>
       </div>
-      <button class="new-task" type="button" disabled title="该共享入口固定使用一个 Session">
+      <button class="new-task" id="new-task" type="button" title="添加已有会话或创建新会话">
         <svg><use href="#i-plus"></use></svg><span>新任务</span>
       </button>
       <nav class="task-nav" aria-label="共享任务">
@@ -220,6 +220,29 @@
     </div>
   </dialog>
 
+  <dialog class="task-dialog" id="new-task-dialog" aria-labelledby="new-task-heading" aria-describedby="task-sharing-note">
+    <form id="task-form">
+      <header><h2 id="new-task-heading">新任务</h2><p id="task-sharing-note">选择已有会话或新建独立会话。添加后，所有能访问此 Share 的用户均可见。</p></header>
+      <fieldset class="task-modes"><legend class="sr-only">操作方式</legend>
+        <label><input type="radio" name="task-mode" value="existing" checked> 已有会话</label>
+        <label><input type="radio" name="task-mode" value="create"> 新建会话</label>
+      </fieldset>
+      <section id="task-existing-panel">
+        <label for="task-search">查找已有会话</label>
+        <div class="task-search-row"><input id="task-search" type="search" placeholder="搜索标题或 Session ID" maxlength="200" autocomplete="off"><button id="task-refresh" type="button">刷新</button></div>
+        <div id="task-candidates" class="task-candidates" aria-label="已有会话列表" tabindex="0"></div>
+        <label for="task-session-id">选中的 Session ID（也可直接粘贴）</label>
+        <input id="task-session-id" type="text" maxlength="36" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+      </section>
+      <section id="task-create-panel" hidden>
+        <label for="task-project">项目工作目录</label><select id="task-project"></select>
+        <p>默认当前任务的项目，也可选择其他已有项目。新会话使用当前 Share 的权限配置，不影响原任务。</p>
+      </section>
+      <p id="task-message" class="task-message" role="status" aria-live="polite"></p>
+      <footer><button id="task-cancel" type="button">取消</button><button id="task-submit" class="task-primary" type="submit">添加到共享任务</button></footer>
+    </form>
+  </dialog>
+  <script src="/tasks.js" defer></script>
   <script src="/realtime.js" defer></script>
   <script src="/history.js" defer></script>
   <script src="/notifications.js" defer></script>

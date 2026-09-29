@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import os
 import queue
 import threading
 from typing import Any, Iterable
@@ -31,6 +32,9 @@ class LanSessionHub:
             raise ValueError("至少需要一个 Session 服务")
         self.logger = logger
         self._services_by_id: dict[str, Any] = {}
+        self._added_by_id: dict[str, dict[str, Any]] = {}
+        self.tasks = None
+        self._added_factory = None
         self._catalog_by_id: dict[str, dict[str, Any]] = {}
         self._session_errors: dict[str, str] = {}
         self._catalog_error: str | None = None
@@ -48,7 +52,32 @@ class LanSessionHub:
     @property
     def thread_ids(self) -> tuple[str, ...]:
         with self._lock:
-            return tuple(self._catalog_by_id if self._catalog_mode else self._services_by_id)
+            base = self._catalog_by_id if self._catalog_mode else self._services_by_id
+            return tuple(dict.fromkeys((*base, *self._added_by_id)))
+
+    def configure_tasks(self, tasks, factory) -> None:
+        self.tasks = tasks
+        self._added_factory = factory
+
+    def register_session(self, metadata) -> None:
+        with self._lock:
+            self._added_by_id[metadata['id']] = deepcopy(metadata)
+            if metadata.get('error'):
+                self._session_errors[metadata['id']] = metadata['error']
+            else:
+                self._session_errors.pop(metadata['id'], None)
+            if self._default_session_id is None:
+                self._default_session_id = metadata['id']
+        self._broadcast()
+
+    def _restore_tasks(self):
+        if self.tasks:
+            try:
+                self.tasks.restore()
+            except ValueError as exc:
+                self._catalog_error = str(exc)
+                if self.logger:
+                    self.logger.warning('%s', exc)
 
     @property
     def catalog_mode(self) -> bool:
@@ -85,6 +114,7 @@ class LanSessionHub:
                 daemon=True,
             )
             self._refresh_thread.start()
+            self._restore_tasks()
             return
         mapped: dict[str, Any] = {}
         for service in self._services:
@@ -98,6 +128,7 @@ class LanSessionHub:
         with self._lock:
             self._services_by_id = mapped
             self._default_session_id = next(iter(mapped))
+        self._restore_tasks()
         self._broadcast()
 
     def resolve_session_id(self, session_id: Any = None) -> str:
@@ -107,7 +138,7 @@ class LanSessionHub:
         with self._lock:
             selected = requested or self._default_session_id
             allowed = self._catalog_by_id if self._catalog_mode else self._services_by_id
-            if not selected or (selected not in allowed and selected not in self._services_by_id):
+            if not selected or (selected not in allowed and selected not in self._services_by_id and selected not in self._added_by_id):
                 raise ValueError("指定的 Session 不在共享列表中")
             return selected
 
@@ -117,19 +148,20 @@ class LanSessionHub:
             service = self._services_by_id.get(selected)
         if service is not None:
             return selected, service
-        if not self._catalog_mode:
-            raise ValueError("指定的 Session 不在共享列表中")
         with self._service_create_lock:
             with self._lock:
                 service = self._services_by_id.get(selected)
-                metadata = deepcopy(self._catalog_by_id.get(selected))
+                metadata = deepcopy(self._added_by_id.get(selected) or self._catalog_by_id.get(selected))
+                factory = self._added_factory if selected in self._added_by_id else self._service_factory
             if service is not None:
                 return selected, service
-            if metadata is None:
+            if metadata is None or factory is None:
                 raise ValueError("指定的 Session 不在共享列表中")
             service = None
             try:
-                service = self._service_factory(metadata)
+                if metadata.get('error'):
+                    raise ValueError(metadata['error'])
+                service = factory(metadata)
                 service.add_change_handler(self._service_changed)
                 service.start()
                 actual_id = str(service.thread_id or "").strip()
@@ -197,9 +229,13 @@ class LanSessionHub:
         }
 
     def session_summaries(self) -> list[dict[str, Any]]:
-        if self._catalog_mode:
+        if self._catalog_mode or self._added_by_id:
             with self._lock:
-                entries = list(self._catalog_by_id.items())
+                merged = dict(self._catalog_by_id)
+                if not self._catalog_mode:
+                    merged.update({sid: {} for sid in self._services_by_id})
+                merged.update(self._added_by_id)
+                entries = list(merged.items())
                 services = dict(self._services_by_id)
                 errors = dict(self._session_errors)
             summaries: list[dict[str, Any]] = []
@@ -218,8 +254,8 @@ class LanSessionHub:
                     }
                 value.update({
                     "thread_id": thread_id,
-                    "cwd": entry.get("cwd"),
-                    "project_id": entry.get("projectId"),
+                    "cwd": entry.get("cwd") or value.get("cwd"),
+                    "project_id": entry.get("projectId") or value.get("project_id"),
                     "updated_at": entry.get("recencyAt") or entry.get("updatedAt") or entry.get("createdAt"),
                 })
                 if thread_id in errors:
@@ -237,13 +273,15 @@ class LanSessionHub:
         return summaries
 
     def project_summaries(self) -> list[dict[str, Any]]:
-        if not self._catalog_mode:
-            return []
         groups: dict[str, dict[str, Any]] = {}
         for session in self.session_summaries():
             cwd = str(session.get("cwd") or "").strip()
             project_id = str(session.get("project_id") or "").strip()
-            key = project_id or cwd or "unassigned"
+            try:
+                canonical = str(Path(cwd).expanduser().resolve()) if cwd else ''
+            except (OSError, ValueError):
+                canonical = cwd
+            key = os.path.normcase(canonical) or project_id or "unassigned"
             project = groups.get(key)
             if project is None:
                 name = Path(cwd).name if cwd else "未分配项目"
@@ -268,11 +306,11 @@ class LanSessionHub:
             self._catalog_by_id = mapped
             self._catalog_error = None
             if self._default_session_id not in mapped:
-                self._default_session_id = next(iter(mapped), None)
+                self._default_session_id = next(iter(mapped), next(iter(self._added_by_id), None))
             stale_services = [
                 (thread_id, service)
                 for thread_id, service in self._services_by_id.items()
-                if thread_id not in mapped
+                if thread_id not in mapped and thread_id not in self._added_by_id
             ]
         removable: list[tuple[str, Any]] = []
         for thread_id, service in stale_services:
@@ -383,6 +421,12 @@ class LanSessionHub:
 
     def close(self) -> None:
         self._stop.set()
+        if self.tasks:
+            try:
+                self.tasks.close()
+            except Exception as exc:
+                if self.logger:
+                    self.logger.warning('Cannot close task metadata client: %s', type(exc).__name__)
         if self._catalog_mode:
             try:
                 self._catalog_client.close()
@@ -392,9 +436,7 @@ class LanSessionHub:
         if self._refresh_thread and self._refresh_thread.is_alive():
             self._refresh_thread.join(timeout=2)
         with self._lock:
-            services = list(self._services_by_id.values())
-            if not self._catalog_mode:
-                services = list(self._services)
+            services = list(dict.fromkeys([*self._services, *self._services_by_id.values()]))
         for service in reversed(services):
             try:
                 service.close()

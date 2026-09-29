@@ -386,7 +386,28 @@ class CodexClient:
                     })
                 return models
 
-    def list_threads(self) -> list[dict[str, Any]]:
+    def read_thread_metadata(self, thread_id: str) -> dict[str, Any]:
+        self.start()
+        result = self.rpc.request("thread/read", {"threadId": thread_id, "includeTurns": False}, timeout=30)
+        thread = (result or {}).get("thread")
+        if not isinstance(thread, dict) or thread.get("id") != thread_id:
+            raise CodexClientError("Codex thread/read 返回无效")
+        return thread
+
+    def create_thread(self, workspace: Path) -> dict[str, Any]:
+        self.start()
+        result = self.rpc.request("thread/start", {**self._thread_params(), "cwd": str(workspace)}, timeout=60)
+        thread = (result or {}).get("thread")
+        if not isinstance(thread, dict) or not thread.get("id"):
+            raise CodexClientError("Codex 未返回 thread id")
+        try:
+            self.rpc.request("thread/name/set", {"threadId": thread["id"], "name": "新会话"}, timeout=10)
+            thread["name"] = "新会话"
+        except Exception:
+            pass  # Creation succeeded; a naming failure must not trigger another creation.
+        return thread
+
+    def list_threads(self, max_items: int | None = None) -> list[dict[str, Any]]:
         self.start()
         assert self.rpc is not None
         threads_by_id: dict[str, dict[str, Any]] = {}
@@ -413,6 +434,8 @@ class CodexClient:
                 if raw.get("ephemeral") is True or raw.get("parentThreadId"):
                     continue
                 threads_by_id.setdefault(thread_id, dict(raw))
+            if max_items is not None and len(threads_by_id) >= max_items:
+                break
             next_cursor = result.get("nextCursor")
             if next_cursor is None or next_cursor == "":
                 break

@@ -70,6 +70,39 @@ def test_hub_selects_and_routes_independent_sessions():
     assert first.closed and second.closed
 
 
+def test_static_hub_can_register_lazy_session_without_expanding_preview_roots(tmp_path):
+    first = FakeSessionService('session-a', 'Alpha')
+    added = []
+    hub = LanSessionHub([first])
+    hub.configure_tasks(None, lambda metadata: added.append(FakeSessionService(metadata['id'], metadata['name'])) or added[-1])
+    hub.start()
+    try:
+        hub.register_session({'id': 'session-b', 'cwd': str(tmp_path), 'name': 'Beta'})
+        assert hub.thread_ids == ('session-a', 'session-b')
+        assert hub.snapshot('session-a')['sessions'][1]['connection'] == 'not_loaded'
+        assert added == []
+        assert hub.preview_roots == ()
+        assert hub.snapshot('session-b')['thread_id'] == 'session-b'
+        assert len(added) == 1
+        hub.snapshot('session-b')
+        assert len(added) == 1
+    finally:
+        hub.close()
+    assert added[0].closed
+
+
+def test_project_groups_use_directory_identity_not_mixed_project_ids(tmp_path):
+    hub = LanSessionHub([FakeSessionService('a', 'A')])
+    hub.start()
+    try:
+        hub.register_session({'id': 'b', 'cwd': str(tmp_path), 'projectId': 'project', 'name': 'B'})
+        hub.register_session({'id': 'c', 'cwd': str(tmp_path / 'child' / '..'), 'name': 'C'})
+        project = next(p for p in hub.project_summaries() if len(p['sessions']) == 2)
+        assert [s['thread_id'] for s in project['sessions']] == ['b', 'c']
+    finally:
+        hub.close()
+
+
 def test_hub_fans_out_session_updates():
     service = FakeSessionService("session-a", "Alpha")
     hub = LanSessionHub([service])

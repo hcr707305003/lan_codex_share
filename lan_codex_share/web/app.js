@@ -64,12 +64,12 @@ const imageLightboxError = document.getElementById('image-lightbox-error');
 const imageLightboxClose = document.getElementById('image-lightbox-close');
 
 let selectedFiles = [];
+const sessionDrafts = new Map();
 let sendingMessage = false;
 let previewObjectUrls = [];
 let lastVersion = -1;
 let latestSnapshot = null;
 let selectedSessionId = new URL(window.location.href).searchParams.get('session') || '';
-let sessionOptionSignature = '';
 let projectNavigationSignature = '';
 let selectionGeneration = 0;
 let composing = false;
@@ -265,10 +265,10 @@ function sessionNavigationState(session) {
 }
 
 function renderProjectNavigation(snapshot, selected) {
-  const catalogMode = snapshot.catalog_mode === true;
-  sessionControl.hidden = catalogMode;
-  if (!catalogMode) return;
-  const projects = Array.isArray(snapshot.projects) ? snapshot.projects : [];
+  sessionControl.hidden = true;
+  const projects = Array.isArray(snapshot.projects) && snapshot.projects.length ? snapshot.projects : [
+    {id: 'shared', name: '共享会话', sessions: snapshot.sessions || []},
+  ];
   const signature = JSON.stringify([selected, projects.map(project => [
     project.id, project.name, project.cwd,
     (project.sessions || []).map(session => [
@@ -342,44 +342,14 @@ function renderProjectNavigation(snapshot, selected) {
 }
 
 function renderSessionSelector(snapshot) {
-  const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
   const selected = String(snapshot.selected_session_id || snapshot.thread_id || '');
   renderProjectNavigation(snapshot, selected);
-  if (snapshot.catalog_mode === true) {
-    if (selected) {
-      selectedSessionId = selected;
-      const url = new URL(window.location.href);
-      url.searchParams.set('session', selected);
-      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
-    }
-    return;
-  }
-  sessionControl.hidden = false;
-  const signature = JSON.stringify(sessions.map(session => [
-    session.thread_id, session.name, session.status, session.connection, session.queue_size,
-  ]));
-  if (signature !== sessionOptionSignature) {
-    sessionOptionSignature = signature;
-    sessionSelect.replaceChildren();
-    for (const session of sessions) {
-      const option = document.createElement('option');
-      const id = String(session.thread_id || '');
-      const name = String(session.name || '').trim();
-      option.value = id;
-      option.textContent = `${name && name !== id ? `${name} · ` : ''}${shortId(id)} · ${sessionStatusLabel(session)}`;
-      option.title = `${name || 'Codex Session'}\n${id}\n${sessionStatusLabel(session)}`;
-      sessionSelect.append(option);
-    }
-  }
   if (selected) {
     selectedSessionId = selected;
-    sessionSelect.value = selected;
     const url = new URL(window.location.href);
     url.searchParams.set('session', selected);
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   }
-  sessionSelect.disabled = sessions.length <= 1;
-  sessionSelect.setAttribute('aria-label', sessions.length > 1 ? `选择共享 Session，共 ${sessions.length} 个` : '当前共享 Session');
 }
 
 function clipText(value, limit = maxRenderedJson) {
@@ -1540,6 +1510,11 @@ function selectSession(next) {
     return setNotice('附件正在发送，请完成后再切换会话。');
   }
   if (!next || next === selectedSessionId) return;
+  sessionDrafts.set(selectedSessionId, {text: input.value, files: [...selectedFiles]});
+  const draft = sessionDrafts.get(next);
+  input.value = draft?.text || '';
+  selectedFiles = [...(draft?.files || [])];
+  renderPreviews();
   taskNotifications.reset();
   selectedSessionId = next;
   selectionGeneration += 1;
@@ -1547,6 +1522,7 @@ function selectSession(next) {
   historyTimeline.reset();
   manuallyExpanded.clear(); manuallyCollapsed.clear();
   latestSnapshot = null;
+  updateSendState();
   lastVersion = -1;
   closeMenu(); closeModelPanel(); closeFilePreview(); closeImageLightbox({restoreFocus: false});
   const loading = el('div', 'initial-loading');
@@ -1564,6 +1540,22 @@ function selectSession(next) {
 }
 
 sessionSelect.addEventListener('change', () => selectSession(sessionSelect.value));
+
+LanTasks.mount({
+  request: fetchHistoryJson,
+  mutate: (path, payload) => mutateForSession(path, payload.session_id || null, payload),
+  current: () => ({cwd: latestSnapshot?.thread?.cwd}),
+  canSubmit: () => {
+    if (!appAuthenticated) { setNotice('请先登录。', true); return false; }
+    if (sendingMessage) { setNotice('附件正在发送，请完成后再操作。'); return false; }
+    return true;
+  },
+  onAdded: result => {
+    scheduleRefresh();
+    setNotice(result.already_shared ? '该会话已在左侧共享任务中。' : '会话已添加到左侧共享任务。');
+  },
+  onCreated: result => { selectSession(result.session_id); closeSidebar(); },
+});
 
 imageInput.addEventListener('change', () => { addImageFiles(imageInput.files); imageInput.value = ''; });
 document.getElementById('attach-files').addEventListener('click', () => { if (!sendingMessage) imageInput.click(); });
