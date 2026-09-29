@@ -14,14 +14,37 @@ class HistoryTimeline {
   constructor({root, renderTurn, fetchPage, onError}) {
     Object.assign(this, {root, renderTurn, fetchPage, onError});
     this.generation = 0;
+    this.resizeObserver = new ResizeObserver(() => {
+      if (this.following && this.entries.size) this.pinToBottom();
+    });
     this.reset();
     this.root.addEventListener('scroll', () => {
+      const top = this.root.scrollTop;
+      if (this.root.scrollHeight - top - this.root.clientHeight <= 2) this.following = true;
+      else if (top < this.lastScrollTop) this.following = false;
+      this.lastScrollTop = top;
       if (this.root.scrollTop <= 80 && !this.failed) this.loadEarlier();
+    }, {passive: true});
+    this.root.addEventListener('wheel', event => {
+      if (event.deltaY < 0) this.following = false;
+    }, {passive: true});
+    this.root.addEventListener('keydown', event => {
+      if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) this.following = false;
+    });
+    this.root.addEventListener('touchstart', event => { this.touchY = event.touches[0]?.clientY; }, {passive: true});
+    this.root.addEventListener('touchmove', event => {
+      const y = event.touches[0]?.clientY;
+      if (y > this.touchY) this.following = false;
+      this.touchY = y;
     }, {passive: true});
   }
 
   reset() {
     this.generation += 1;
+    this.following = true;
+    this.lastScrollTop = 0;
+    this.resizeObserver.disconnect();
+    this.resizeObserver.observe(this.root, {box: 'border-box'});
     this.controller?.abort();
     for (const entry of this.entries?.values() || []) entry.node.dispose?.();
     this.entries = new Map();
@@ -55,6 +78,11 @@ class HistoryTimeline {
     return null;
   }
 
+  pinToBottom() {
+    this.root.scrollTop = this.root.scrollHeight;
+    this.lastScrollTop = this.root.scrollTop;
+  }
+
   restore(anchor) {
     const node = anchor && this.entries.get(anchor.id)?.node;
     if (node) this.root.scrollTop += node.getBoundingClientRect().top - anchor.top;
@@ -68,7 +96,7 @@ class HistoryTimeline {
     this.epoch = page.epoch;
     this.latest = snapshot;
     const first = !this.entries.size;
-    const atBottom = this.root.scrollHeight - this.root.scrollTop - this.root.clientHeight < 120;
+    const atBottom = this.following;
     const anchor = !first && !atBottom ? this.anchor() : null;
     this.merge(turns, page);
     // Bound automatic growth during days-long streams; manually loaded history
@@ -78,11 +106,16 @@ class HistoryTimeline {
       for (const [id, entry] of this.entries) if (entry.index < cutoff) this.remove(id);
     }
     this.draw();
-    if (first || atBottom) this.root.scrollTop = this.root.scrollHeight;
+    if (first || atBottom) {
+      this.following = true;
+      this.pinToBottom();
+    }
     else this.restore(anchor);
   }
 
   remove(id) {
+    const node = this.entries.get(id)?.node;
+    if (node) this.resizeObserver.unobserve(node);
     this.entries.get(id)?.node.dispose?.();
     this.entries.get(id)?.node.remove();
     this.entries.delete(id);
@@ -93,6 +126,8 @@ class HistoryTimeline {
       const old = this.entries.get(turn.id);
       const revision = turn.history_revision ?? JSON.stringify(turn);
       const node = old?.revision === revision ? old.node : this.renderTurn(turn, old?.node);
+      if (old?.node && old.node !== node) this.resizeObserver.unobserve(old.node);
+      this.resizeObserver.observe(node, {box: 'border-box'});
       this.entries.set(turn.id, {turn, revision, node, index: page.start + offset});
     });
   }
@@ -116,6 +151,7 @@ class HistoryTimeline {
 
   async loadEarlier() {
     if (!this.before || this.loading) return;
+    this.following = false;
     const loadingAnchor = this.anchor();
     this.loading = true;
     this.failed = false;

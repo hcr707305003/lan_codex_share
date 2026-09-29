@@ -16,6 +16,12 @@ class Element {
   getBoundingClientRect() { const top = this.parent ? this.parent.children.indexOf(this) * 100 - this.parent.scrollTop : 0; return {top, bottom: top + (this.parent ? 100 : 300)}; }
 }
 global.document = {createElement: () => new Element()};
+global.ResizeObserver = class {
+  constructor(callback) { this.callback = callback; this.nodes = new Set(); }
+  observe(node) { this.nodes.add(node); }
+  unobserve(node) { this.nodes.delete(node); }
+  disconnect() { this.nodes.clear(); }
+};
 function page(start=80, end=100, epoch='epoch') {
   return {thread_id: 'session', history: {epoch, start, end, total: end, before: start ? `${epoch}:${start}` : null},
     thread: {turns: Array.from({length: end-start}, (_, i) => ({id: `t${start+i}`, history_revision: 0}))}};
@@ -107,4 +113,35 @@ test('automatic loading stops after an error until explicit retry', async () => 
   assert.equal(requests, 1);
   assert.equal(view.more.hidden, false);
   assert.equal(view.more.textContent, '重试加载历史');
+});
+
+test('delayed layout growth follows latest until the reader scrolls up', () => {
+  const {view, root} = fixture();
+  view.update(page());
+  Object.defineProperty(root, 'scrollHeight', {configurable: true, value: 3000});
+  // A scroll event queued by the initial bottom jump may arrive after layout growth.
+  root.events.scroll();
+  view.resizeObserver.callback();
+  assert.equal(root.scrollTop, 3000);
+  root.events.wheel({deltaY: -100});
+  root.scrollTop = 1600;
+  root.events.scroll();
+  Object.defineProperty(root, 'scrollHeight', {configurable: true, value: 3500});
+  view.resizeObserver.callback();
+  assert.equal(root.scrollTop, 1600);
+  view.update(page());
+  assert.equal(root.scrollTop, 1600);
+});
+
+test('session reset re-enables bottom follow and unobserves old turns', () => {
+  const {view, root} = fixture();
+  view.update(page());
+  const old = root.children[1];
+  root.scrollTop = 400; root.events.scroll();
+  view.reset(); view.update(page(0, 10, 'other'));
+  assert.equal(view.resizeObserver.nodes.has(old), false);
+  assert.equal(view.resizeObserver.nodes.has(root), true);
+  Object.defineProperty(root, 'scrollHeight', {configurable: true, value: 2600});
+  view.resizeObserver.callback();
+  assert.equal(root.scrollTop, 2600);
 });
