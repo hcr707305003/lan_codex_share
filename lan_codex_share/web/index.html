@@ -85,6 +85,12 @@
             <h1 id="thread-title">局域网共享 Codex 会话</h1>
             <div class="workspace-path" id="workspace-path">正在读取真实 Session</div>
           </div>
+          <div class="session-notice" id="session-notice" hidden>
+            <button id="session-notice-toggle" type="button" aria-expanded="false" aria-controls="session-notice-panel">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 10v5h4l11 4V5L8 10H4Z M8 15l2 6h3l-2-5"/></svg><span>项目公告</span>
+              <svg class="notice-chevron" aria-hidden="true"><use href="#i-chevron"></use></svg>
+            </button>
+          </div>
         </div>
         <div class="topbar-actions">
           <label class="session-control" id="session-control" for="session-select">
@@ -126,16 +132,15 @@
         </div>
       </header>
 
-      <section class="session-notice" id="session-notice" aria-label="项目公告" hidden>
+      <section class="session-notice-panel" id="session-notice-panel" aria-label="项目公告" hidden>
         <div class="session-notice-heading">
-          <button id="session-notice-toggle" type="button" aria-expanded="false" aria-controls="session-notice-body">
-            <svg aria-hidden="true"><use href="#i-chevron"></use></svg><span>项目公告</span>
-          </button>
-          <button id="session-notice-edit" type="button" aria-label="编辑项目公告">编辑</button>
+          <strong>项目公告</strong>
+          <button id="session-notice-close" type="button" aria-label="关闭项目公告">×</button>
         </div>
         <p id="session-notice-status" role="status" hidden></p>
         <button id="session-notice-retry" type="button" hidden>重试读取公告</button>
         <div class="session-notice-body profile-markdown" id="session-notice-body" role="region" aria-label="公告内容" tabindex="0" hidden></div>
+        <div class="session-notice-footer"><span>当前项目的共享资料</span><button id="session-notice-edit" type="button" aria-label="编辑项目公告">编辑公告</button></div>
       </section>
 
       <div class="timeline-shell">

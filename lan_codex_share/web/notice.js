@@ -6,15 +6,22 @@
     function paint() {
       options.layout(() => {
         options.root.hidden = !project?.has_notice || cached === '';
+        options.panel.hidden = !expanded || options.root.hidden;
         options.toggle.setAttribute('aria-expanded', String(expanded));
         options.body.hidden = !expanded;
         options.status.hidden = !expanded || (!loading && !error);
         options.status.textContent = loading ? '正在读取公告…' : error;
         options.retry.hidden = !expanded || !error;
+        if (!options.panel.hidden) options.position?.();
       });
     }
     function cancel() {
       generation++; controller?.abort(); controller = null; loading = false;
+    }
+    function dismiss(restoreFocus = false) {
+      if (!expanded) return;
+      expanded = false; cancel(); paint();
+      if (restoreFocus && !options.root.hidden) options.toggle.focus({preventScroll: true});
     }
     function clearBody() {
       options.layout(() => options.body.replaceChildren());
@@ -47,16 +54,27 @@
       if (changedSession || changedProject || !project?.has_notice) expanded = false;
       clearBody(); paint(); load();
     }
-    options.toggle.addEventListener('click', () => {
+    options.toggle.addEventListener('click', event => {
       if (!project?.has_notice) return;
-      expanded = !expanded; paint();
-      if (expanded) load();
-      else cancel();
+      if (expanded) { dismiss(); return; }
+      options.beforeOpen?.(); expanded = true; paint(); load();
+      if (event?.detail === 0) options.close.focus({preventScroll: true});
     });
     options.retry.addEventListener('click', () => { error = ''; load(); });
-    options.edit.addEventListener('click', () => { if (project) options.editProject(project); });
+    options.edit.addEventListener('click', () => {
+      if (project && options.editProject(project) !== false) dismiss();
+    });
+    options.close.addEventListener('click', () => dismiss(true));
+    options.document.addEventListener('pointerdown', event => {
+      if (!options.root.contains(event.target) && !options.panel.contains(event.target)) dismiss();
+    });
+    options.document.addEventListener('keydown', event => {
+      if (expanded && event.key === 'Escape') {
+        event.preventDefault(); event.stopImmediatePropagation(); dismiss(true);
+      }
+    });
     paint();
-    return {update};
+    return {update, close: dismiss};
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = {mount};
   else root.LanNotice = {mount};

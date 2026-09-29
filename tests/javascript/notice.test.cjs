@@ -6,13 +6,14 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 function element() {
   return {hidden: false, textContent: '', attrs: {}, children: [], handlers: {},
     setAttribute(k,v) {this.attrs[k] = v;}, addEventListener(k,v) {this.handlers[k] = v;},
-    replaceChildren(...nodes) {this.children = nodes;}, click() {return this.handlers.click();}};
+    replaceChildren(...nodes) {this.children = nodes;}, click() {return this.handlers.click();},
+    contains(target) {return target === this;}, focus() {this.focused = true;}};
 }
-function setup(request = async () => ({notice_markdown: '# Hello'})) {
-  const options = Object.fromEntries(['root','toggle','body','retry','status','edit'].map(k => [k, element()]));
+function setup(request = async () => ({notice_markdown: '# Hello'}), overrides = {}) {
+  const options = Object.fromEntries(['root','toggle','body','retry','status','edit','panel','close','document'].map(k => [k, element()]));
   const calls = [], edits = [];
   Object.assign(options, {request: (...args) => { calls.push(args); return request(...args); },
-    markdown: value => value, layout: fn => fn(), editProject: p => edits.push(p)});
+    markdown: value => value, layout: fn => fn(), editProject: p => edits.push(p)}, overrides);
   return {...options, calls, edits, controller: mount(options)};
 }
 test('default collapsed, lazy fetch, cached toggle and edit target', async () => {
@@ -24,6 +25,24 @@ test('default collapsed, lazy fetch, cached toggle and edit target', async () =>
   assert.equal(c.calls.length, 1);
   c.edit.click(); assert.equal(c.edits[0].id, 'p');
   c.controller.update('b', project); assert.equal(c.body.hidden, true);
+});
+test('popover closes on outside pointer, Escape and close button without stealing outside focus', async () => {
+  const c = setup(); c.controller.update('a', project); c.toggle.click(); await tick();
+  assert.equal(c.panel.hidden, false);
+  c.document.handlers.pointerdown({target: c.panel}); assert.equal(c.panel.hidden, false);
+  c.document.handlers.pointerdown({target: element()}); assert.equal(c.panel.hidden, true);
+  assert.equal(c.toggle.focused, undefined);
+  c.toggle.click(); c.document.handlers.keydown({key:'Escape', preventDefault(){}, stopImmediatePropagation(){}});
+  assert.equal(c.panel.hidden, true); assert.equal(c.toggle.focused, true);
+  c.toggle.focused = false; c.toggle.click(); c.close.click();
+  assert.equal(c.panel.hidden, true); assert.equal(c.toggle.focused, true);
+});
+test('rejected edit handoff retains notice; keyboard open focuses panel controls', async () => {
+  const c = setup(undefined, {editProject: () => false});
+  c.controller.update('a', project); c.toggle.handlers.click({detail:0}); await tick();
+  assert.equal(c.close.focused, true);
+  c.edit.click(); assert.equal(c.panel.hidden, false);
+  c.controller.close(); assert.equal(c.panel.hidden, true);
 });
 test('late response never leaks across sessions', async () => {
   let resolve; const c = setup(() => new Promise(r => {resolve = r;}));

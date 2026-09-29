@@ -1573,10 +1573,26 @@ const projectProfiles = LanProfiles.mount({
   },
 });
 
+const noticePanel = document.getElementById('session-notice-panel');
+document.body.append(noticePanel);
+function positionNotice() {
+  if (noticePanel.hidden) return;
+  const bounds = document.querySelector('.main-panel').getBoundingClientRect();
+  const anchor = document.getElementById('session-notice-toggle').getBoundingClientRect();
+  const left = Math.max(12, bounds.left + 12), right = Math.min(innerWidth - 12, bounds.right - 12);
+  const width = Math.min(420, Math.max(0, right - left));
+  const top = Math.min(anchor.bottom + 8, Math.max(12, innerHeight - 160));
+  Object.assign(noticePanel.style, {
+    width: `${width}px`, left: `${Math.max(left, Math.min(anchor.left, right - width))}px`,
+    top: `${top}px`, maxHeight: `${Math.max(0, Math.min(460, innerHeight - top - 12))}px`,
+  });
+}
 const sessionNotice = LanNotice.mount({
   root: document.getElementById('session-notice'), toggle: document.getElementById('session-notice-toggle'),
   body: document.getElementById('session-notice-body'), status: document.getElementById('session-notice-status'),
   retry: document.getElementById('session-notice-retry'), edit: document.getElementById('session-notice-edit'),
+  panel: noticePanel, close: document.getElementById('session-notice-close'), document,
+  position: positionNotice, beforeOpen: () => { closeMenu(); closeModelPanel(); },
   request: fetchHistoryJson, markdown: renderMarkdown,
   editProject: project => projectProfiles.open(project, true),
   layout: change => {
@@ -1587,6 +1603,8 @@ const sessionNotice = LanNotice.mount({
     syncScrollToBottomButton();
   },
 });
+new ResizeObserver(positionNotice).observe(document.querySelector('.main-panel'));
+window.addEventListener('resize', positionNotice);
 
 LanTasks.mount({
   request: fetchHistoryJson,
@@ -1641,10 +1659,12 @@ composerRegion.addEventListener('drop', event => {
 });
 
 menuToggle.addEventListener('click', event => {
+  sessionNotice.close();
   event.stopPropagation(); closeModelPanel(); taskMenu.hidden = !taskMenu.hidden;
   menuToggle.setAttribute('aria-expanded', String(!taskMenu.hidden));
 });
 modelToggle.addEventListener('click', event => {
+  sessionNotice.close();
   event.stopPropagation(); closeMenu(); modelPanel.hidden = !modelPanel.hidden;
   modelToggle.setAttribute('aria-expanded', String(!modelPanel.hidden));
   if (!modelPanel.hidden) populateModelPanel();

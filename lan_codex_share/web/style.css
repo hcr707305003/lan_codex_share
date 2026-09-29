@@ -246,23 +246,26 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .sidebar-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-row.muted { color: var(--muted); }
 
-.main-panel { container-type: inline-size; display: grid; width: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; background: var(--bg); }
+.main-panel { container-type: inline-size; display: grid; width: 100%; min-width: 0; min-height: 0; overflow: hidden; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; background: var(--bg); }
 .main-panel > .topbar { grid-row: 1; }
-.main-panel > .timeline-shell { grid-row: 3; }
-.main-panel > .composer-region { grid-row: 4; }
-.session-notice { grid-row: 2; min-width: 0; border-bottom: 1px solid var(--border); padding: 0 20px; background: var(--panel); }
-.session-notice[hidden], .session-notice [hidden] { display: none !important; }
-.session-notice-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.session-notice button { border: 0; background: transparent; color: var(--text-soft); padding: 8px; min-height: 36px; cursor: pointer; border-radius: 6px; font: inherit; font-size: 12px; }
-.session-notice button:hover { color: var(--text); background: var(--surface-hover); }
-.session-notice :focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
-#session-notice-toggle { display: flex; gap: 8px; align-items: center; text-align: left; flex: 1; }
+.main-panel > .timeline-shell { grid-row: 2; }
+.main-panel > .composer-region { grid-row: 3; }
+.session-notice { flex: 0 0 auto; }
+.session-notice[hidden], .session-notice-panel[hidden], .session-notice-panel [hidden] { display: none !important; }
+.session-notice button, .session-notice-panel button { border: 0; background: transparent; color: var(--text-soft); padding: 8px; min-height: 36px; cursor: pointer; border-radius: 7px; font: inherit; font-size: 12px; }
+.session-notice button:hover, .session-notice-panel button:hover { color: var(--text); background: var(--surface-hover); }
+.session-notice :focus-visible, .session-notice-panel :focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
+#session-notice-toggle { display: flex; gap: 6px; align-items: center; white-space: nowrap; border: 1px solid var(--border); background: var(--panel); }
 #session-notice-toggle svg { width: 14px; height: 14px; }
-#session-notice-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
-.session-notice-body { max-height: min(280px, 35dvh); overflow: auto; overscroll-behavior: contain; padding: 10px 8px 16px; overflow-wrap: anywhere; }
-#session-notice-status { color: var(--text-soft); margin: 8px; font-size: 12px; }
-@media (max-width: 720px) { .session-notice { padding: 0 8px; } .session-notice button { min-height: 44px; } }
-@media (max-height: 500px) { .session-notice-body { max-height: min(20dvh, max(40px, calc(100dvh - 330px))); } }
+#session-notice-toggle[aria-expanded="true"] .notice-chevron { transform: rotate(180deg); }
+.session-notice-panel { position: fixed; z-index: 25; display: flex; flex-direction: column; width: 420px; max-width: calc(100vw - 24px); border: 1px solid var(--border); border-radius: 14px; background: var(--panel); color: var(--text); box-shadow: 0 16px 48px #0005; overflow: hidden; }
+.session-notice-heading { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px 8px 18px; border-bottom: 1px solid var(--border); font-size: 13px; }
+#session-notice-close { font-size: 22px; width: 36px; }
+.session-notice-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 14px 18px; overflow-wrap: anywhere; }
+.session-notice-body > :first-child { margin-top: 0; }
+.session-notice-footer { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px 6px 18px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+#session-notice-status { color: var(--text-soft); margin: 12px 18px; font-size: 12px; }
+@media (max-width: 720px) { .session-notice button, .session-notice-panel button { min-height: 44px; } .session-notice-footer { padding-left: 14px; } .session-notice-body { padding: 12px 14px; } }
 
 .topbar {
   z-index: 5;

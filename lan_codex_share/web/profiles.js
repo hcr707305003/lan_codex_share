@@ -100,10 +100,11 @@
       finally { if (token === generation) loading = false; }
     }
     function open(project, edit = false) {
-      if (!leave()) return;
+      if (!leave()) return false;
       selected = project; revisionSeen = project.revision || 0;
       editOnLoad = edit;
       options.show(project); load();
+      return true;
     }
     function sync(projects) {
       if (!selected || busy || loading || !record) return;
