@@ -31,6 +31,8 @@
     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-frp" viewBox="0 0 24 24"><rect x="2" y="4" width="5" height="16" rx="2"/><rect x="17" y="4" width="5" height="16" rx="2"/><path d="M6 9h11m-3-3 3 3-3 3M18 15H7m3-3-3 3 3 3"/></symbol>
+    <symbol id="i-cloudflare" viewBox="0 0 24 24"><path d="M4 17a4 4 0 0 1 .7-7.9A6 6 0 0 1 16 7.5a4.5 4.5 0 0 1 4 7.5M3 20h18M2 17h13l2-3h5"/></symbol>
   </svg>
 
   <section class="auth-gate" id="auth-gate" aria-labelledby="auth-title" hidden>
@@ -53,6 +55,7 @@
       <div class="brand-row">
         <div class="codex-mark" aria-hidden="true">C</div>
         <span>Codex</span>
+        <nav id="public-entries" class="public-entries" aria-label="公网访问入口" hidden></nav>
         <button class="icon-button sidebar-close" id="sidebar-close" type="button" aria-label="关闭任务导航">
           <svg><use href="#i-close"></use></svg>
         </button>

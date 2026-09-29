@@ -153,6 +153,15 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   font-weight: 800;
 }
 
+.public-entries { display: flex; gap: 2px; margin-left: auto; }
+.public-entries[hidden] { display: none; }
+.public-entry { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid transparent; border-radius: 8px; text-decoration: none; }
+.public-entry svg { width: 20px; height: 20px; }
+.public-entry.frp { color: #80bdff; }
+.public-entry.cloudflare { color: #ffae66; }
+.public-entry:hover { background: var(--surface); border-color: var(--border-strong); }
+.public-entry:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
 .icon-button {
   display: inline-grid;
   width: 40px;

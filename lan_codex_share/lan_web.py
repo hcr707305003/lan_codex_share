@@ -24,6 +24,7 @@ from .dynamic_proxy import ProxyError, check_browser_origin, forward, parse_targ
 from .static_assets import StaticAssets
 from .stream_delta import SnapshotDelta
 from .auth_tokens import AuthTokens, LOGIN_MAX_AGE
+from .public_entries import PublicEntries
 
 
 AUTH_COOKIE_NAME = "lan_codex_auth"
@@ -83,6 +84,7 @@ class LanWebApplication:
         self.public_origin = normalize_public_origin(public_origin)
         self.cloudflare_origin = normalize_public_origin(cloudflare_origin)
         self.frp_origin = normalize_public_origin(frp_origin)
+        self.public_entries = PublicEntries(self.frp_origin, self.cloudflare_origin)
         if any(entry.startswith("http://") for entry in self.public_origins) and not password.strip():
             raise ValueError("HTTP 公网入口必须设置非空 password；HTTP 不加密密码或会话内容")
         self.app_server_port = app_server_port
@@ -276,6 +278,9 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._require_authentication()
+            if path == '/api/public-entries':
+                self._json(HTTPStatus.OK, {'items': self.app.public_entries.snapshot()})
+                return
             if path == '/api/sessions/management':
                 tasks = getattr(self.app.service, 'tasks', None)
                 if tasks is None:

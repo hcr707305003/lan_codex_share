@@ -182,6 +182,8 @@ function setNotice(text, isError = false) {
 function showAuthentication(message = '', isError = false) {
   taskNotifications.reset();
   appAuthenticated = false;
+  publicEntryItems = [];
+  renderPublicEntries();
   refreshQueued = false;
   selectionGeneration += 1;
   refreshController?.abort();
@@ -1129,6 +1131,7 @@ function render(snapshot) {
   taskNotifications.update(snapshot);
   latestSnapshot = snapshot;
   renderSessionSelector(snapshot);
+  renderPublicEntries();
   projectProfiles.sync(snapshot.projects);
   const thread = snapshot.thread || {};
   const connection = snapshot.connection || 'disconnected';
@@ -1358,8 +1361,60 @@ async function startAuthenticatedApp() {
   if (appAuthenticated) return;
   appAuthenticated = true;
   hideAuthentication();
+  refreshPublicEntries();
   startEvents();
 }
+
+let publicEntryItems = [];
+let publicEntriesLoading = false;
+let publicEntrySignature = '';
+
+function renderPublicEntries() {
+  const root = document.getElementById('public-entries');
+  const signature = JSON.stringify([publicEntryItems, selectedSessionId]);
+  if (signature === publicEntrySignature) return;
+  publicEntrySignature = signature;
+  const links = [];
+  for (const entry of publicEntryItems) {
+    if (!['frp', 'cloudflare'].includes(entry.kind)) continue;
+    let url;
+    try {
+      url = new URL(entry.origin);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) continue;
+    } catch (_) { continue; }
+    if (selectedSessionId) url.searchParams.set('session', selectedSessionId);
+    const name = entry.kind === 'frp' ? 'FRP' : 'Cloudflare';
+    const link = el('a', `public-entry ${entry.kind}`);
+    link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.title = `${name} · ${url.origin}\n检测到进程运行；配置关联及公网连通性未验证\n代理其他服务：${url.origin}/proxy/127.0.0.1:13333/\n前端示例：${url.origin}/proxy/127.0.0.1:3301/#/login\n127.0.0.1 指运行 Share 的电脑；局域网服务可替换为其 IP:端口`;
+    link.setAttribute('aria-label', `打开 ${name} 公网入口（新标签页）`);
+    link.append(icon(entry.kind));
+    links.push(link);
+  }
+  root.replaceChildren(...links);
+  root.hidden = !links.length;
+}
+
+async function refreshPublicEntries() {
+  if (!appAuthenticated || document.hidden || publicEntriesLoading) return;
+  publicEntriesLoading = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch('/api/public-entries', {cache: 'no-store', signal: controller.signal});
+    if (!response.ok) throw new Error('entry status unavailable');
+    const data = await response.json();
+    publicEntryItems = appAuthenticated && Array.isArray(data.items) ? data.items : [];
+  } catch (_) { publicEntryItems = []; }
+  finally {
+    clearTimeout(timeout); publicEntriesLoading = false; renderPublicEntries();
+  }
+}
+setInterval(refreshPublicEntries, 10000);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { publicEntryItems = []; renderPublicEntries(); }
+  else refreshPublicEntries();
+});
 
 async function bootstrapAuthentication() {
   try {
