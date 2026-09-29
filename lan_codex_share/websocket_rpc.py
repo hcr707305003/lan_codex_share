@@ -65,6 +65,11 @@ class WebSocketJsonRpcConnection(JsonRpcConnection):
                 return
             self._socket_closed = True
             try:
-                self.socket.close()
+                # The JSON-RPC reader owns recv(); close() would compete for its
+                # frame lock while waiting for a peer handshake. Wake the reader
+                # with transport shutdown instead, without waiting for the peer.
+                self.socket.abort()
             except Exception:
                 pass
+            finally:
+                self.socket.shutdown()
