@@ -338,7 +338,9 @@ def test_page_snapshot_and_message_post(tmp_path):
 
         status, _, auth_status = request(server, "GET", "/api/auth/status")
         assert status == 200
-        assert json.loads(auth_status) == {"required": False, "authenticated": True, "notify_on_task_complete": False}
+        auth = json.loads(auth_status)
+        assert {key: auth[key] for key in ('required', 'authenticated', 'notify_on_task_complete')} == {"required": False, "authenticated": True, "notify_on_task_complete": False}
+        assert auth['upload_limits']['max_documents'] == 0
 
         status, _, snapshot = request(server, "GET", "/api/snapshot")
         assert status == 200
@@ -370,7 +372,7 @@ def test_password_authentication_protects_data_routes_and_uses_persistent_cookie
         assert request(server, "GET", "/app.js")[0] == 200
         status, _, body = request(server, "GET", "/api/auth/status")
         assert status == 200
-        assert json.loads(body) == {"required": True, "authenticated": False, "notify_on_task_complete": False}
+        assert {key: json.loads(body)[key] for key in ('required', 'authenticated', 'notify_on_task_complete')} == {"required": True, "authenticated": False, "notify_on_task_complete": False}
 
         for path in (
             "/api/snapshot",
@@ -404,7 +406,7 @@ def test_password_authentication_protects_data_routes_and_uses_persistent_cookie
 
         status, _, body = request(server, "GET", "/api/auth/status", headers={"Cookie": cookie})
         assert status == 200
-        assert json.loads(body) == {"required": True, "authenticated": True, "notify_on_task_complete": False}
+        assert {key: json.loads(body)[key] for key in ('required', 'authenticated', 'notify_on_task_complete')} == {"required": True, "authenticated": True, "notify_on_task_complete": False}
         assert request(server, "GET", "/api/snapshot", headers={"Cookie": cookie})[0] == 200
         assert request(server, "GET", f"/api/images/{image_id}", headers={"Cookie": cookie})[0] == 200
         assert request(

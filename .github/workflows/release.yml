@@ -31,6 +31,8 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pip install -r requirements-desktop.txt
       - run: python -m pytest -q
+      - name: Test web behavior
+        run: node --test tests/javascript/*.test.cjs
       - run: python -m PyInstaller --version
 
   build:
@@ -67,6 +69,8 @@ jobs:
       - run: python -m pip install -r requirements-desktop.txt
       - name: Test desktop behavior
         run: python -m pytest tests/test_desktop_config.py tests/test_desktop_logs.py tests/test_desktop_process.py tests/test_desktop_worker.py tests/test_desktop_installer.py tests/test_desktop_gui.py tests/test_desktop_launcher.py tests/test_desktop_appearance.py tests/test_desktop_icons.py tests/test_desktop_dialogs.py tests/test_desktop_form_help.py tests/test_desktop_directory_list.py tests/test_desktop_session_list.py tests/test_cloudflare_form_ui.py tests/test_frp_apply_share_port.py -q
+      - name: Test document uploads and previews
+        run: python -m pytest tests/test_document_store.py tests/test_document_web.py tests/test_document_messages.py -q
       - name: Validate version
         shell: bash
         run: |
@@ -108,6 +112,15 @@ jobs:
           "$executable" --version
           "$executable" --help
           "$executable" cli --help
+      - name: Verify frozen document extraction
+        shell: bash
+        run: |
+          python -m PyInstaller --noconfirm --onefile --paths . --distpath build/document-smoke --workpath build/document-smoke-work --specpath build tests/fixtures/frozen_document_smoke.py
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            build/document-smoke/frozen_document_smoke.exe
+          else
+            build/document-smoke/frozen_document_smoke
+          fi
       - name: Assemble archive
         shell: bash
         run: python scripts/package_release.py --version "${PACKAGE_TAG#v}" --platform "${{ matrix.platform }}" --with-desktop

@@ -21,6 +21,7 @@ from .lan_access import is_lan_client
 from .lan_config import LanConfigError, load_lan_config
 from .lan_service import LanChatService
 from .lan_store import ImageStore
+from .document_store import DocumentStore, MAX_TOTAL_BYTES
 from .lan_web import LanWebApplication
 from .session_hub import LanSessionHub
 from .session_projection import SessionProjection
@@ -124,11 +125,12 @@ def _chat_service(
     workspace: Path | None = None,
     label: str = "局域网共享 Codex 会话",
     logger_name: str = "lan.service",
+    document_store=None,
 ) -> LanChatService:
     state = StateStore(_session_state_path(runtime, session_id))
     if session_id:
         state.set_thread_id(session_id)
-    projection = SessionProjection(image_store.directory)
+    projection = SessionProjection(image_store.directory, document_store=document_store)
     codex = CodexClient(
         workspace or config.workspace,
         state,
@@ -138,10 +140,10 @@ def _chat_service(
         strict_resume=True,
         sandbox_mode=config.permission_mode,
     )
-    return LanChatService(codex, projection, logging.getLogger(logger_name))
+    return LanChatService(codex, projection, logging.getLogger(logger_name), document_store=document_store)
 
 
-def _build_session_hub(config, runtime: Path, image_store: ImageStore) -> LanSessionHub:
+def _build_session_hub(config, runtime: Path, image_store: ImageStore, document_store=None) -> LanSessionHub:
     if config.discover_all_sessions:
         catalog = CodexClient(
             config.workspace,
@@ -170,6 +172,7 @@ def _build_session_hub(config, runtime: Path, image_store: ImageStore) -> LanSes
                 workspace=workspace,
                 label=label,
                 logger_name=f"lan.service.{hashlib.sha256(session_id.encode('utf-8')).hexdigest()[:8]}",
+                document_store=document_store,
             )
 
         return LanSessionHub(
@@ -189,6 +192,7 @@ def _build_session_hub(config, runtime: Path, image_store: ImageStore) -> LanSes
             session_id,
             label=f"局域网共享 Codex 会话 {index}" if len(configured_sessions) > 1 else "局域网共享 Codex 会话",
             logger_name=f"lan.service.{index}",
+            document_store=document_store,
         )
         for index, session_id in enumerate(configured_sessions, start=1)
     ]
@@ -216,6 +220,7 @@ def run(config_path: str | Path, *, stop_event=None, on_ready=None, on_owned=Non
         allowed_hosts.add(config.host)
 
     image_store = ImageStore(runtime / "uploads", config.max_image_bytes, config.max_images)
+    document_store = DocumentStore(runtime / 'documents', config.max_document_bytes, config.max_documents)
     app_server = AppServerHost(
         "127.0.0.1",
         config.app_server_port,
@@ -223,8 +228,9 @@ def run(config_path: str | Path, *, stop_event=None, on_ready=None, on_owned=Non
         logger=logging.getLogger("lan.app_server"),
         hide_console=stop_event is not None,
     )
-    hub = _build_session_hub(config, runtime, image_store)
+    hub = _build_session_hub(config, runtime, image_store, document_store)
     request_limit = config.max_images * ((config.max_image_bytes + 2) // 3 * 4) + 1024 * 1024
+    request_limit = min(256 * 1024 * 1024, request_limit + (min(MAX_TOTAL_BYTES, config.max_documents * config.max_document_bytes) + 2) // 3 * 4 + config.max_documents * 4)
     server = None
     try:
         with SingleInstanceLock(runtime / "server.lock"):
@@ -234,6 +240,7 @@ def run(config_path: str | Path, *, stop_event=None, on_ready=None, on_owned=Non
                     image_store,
                     allowed_hosts,
                     max_request_bytes=request_limit,
+                    document_store=document_store,
                     workspace=config.workspace,
                     preview_roots=config.preview_roots,
                     password=config.password,

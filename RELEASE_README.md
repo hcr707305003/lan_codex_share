@@ -37,6 +37,14 @@ Windows 程序名为 `lan_codex_share.exe`。macOS/Linux 首次解压后如缺�
 
 此版本未进行 Windows 代码签名或 macOS 公证。运行前可使用 Release 中的 `SHA256SUMS.txt` 核对下载文件。即使启用了密码，默认局域网 HTTP 连接也不会加密传输内容和密码；不要直接映射 HTTP 端口到公网。
 
+## 文档上传与预览（v0.3.0）
+
+网页回形针或拖拽支持 MD、TXT、DOCX、PDF，可与问题和图片一起发送。点击已发送附件的文件名在右侧预览，保留下载原文件入口。MD 渲染排版，TXT 显示文本，DOCX 显示提取的正文和表格文字（不还原原始版式），PDF 依赖浏览器内嵌查看器，不支持时可下载。
+
+默认单文档最多 20 MiB，每条最多 5 个文档；用 `max_document_bytes` 和 `max_documents` 调整。旧 DOC 请转为 DOCX；不支持扫描件 OCR 或加密 PDF。AI 接收提取文字，不包含文档图片和完整排版。版本包已含所需解析依赖，无需安装 Word。
+
+升级或迁移请保留配置旁的 `runtime/lan/documents/`，原文件、预览缓存和消息关联存放于此；取消未开始的排队消息会清理对应附件。预览和下载沿用项目密码与 Session 范围，项目访问者共享附件访问权限，不提供单用户私密文件。
+
 ## 可选公网入口
 
 配置 `cloudflare_origin = "https://codex.example.com"`，让同机运行的 Cloudflare Tunnel 将该域名回源到 `http://localhost:你的Web端口`，保留原始 Host。此模式只接受本机回环代理连接，支持公网 HTTPS 登录、消息发送和事件流，不需要 Cloudflare Access 登录。原局域网 HTTP 入口保持不变。

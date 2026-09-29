@@ -22,6 +22,11 @@ Corresponding upstream source and notices:
 - CPython: <https://www.python.org/downloads/source/>
 - tomlkit: <https://github.com/python-poetry/tomlkit>
 - PyYAML: <https://github.com/yaml/pyyaml>
+- pypdf (document text extraction): <https://github.com/py-pdf/pypdf>
+- defusedxml (bounded DOCX XML parsing): <https://github.com/tiran/defusedxml>
+
+The bundled document parser license texts are collected into the distribution's
+`licenses` directory alongside the other third-party notices.
 
 frpc and cloudflared are not embedded in this GUI archive. If downloaded or
 installed separately, their own distributions and licenses apply. Review all

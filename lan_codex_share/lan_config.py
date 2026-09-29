@@ -23,6 +23,8 @@ class LanConfig:
     turn_timeout_seconds: float = 1800
     max_image_bytes: int = 10 * 1024 * 1024
     max_images: int = 4
+    max_document_bytes: int = 20 * 1024 * 1024
+    max_documents: int = 5
     log_level: str = "INFO"
     preview_roots: tuple[Path, ...] = ()
     session_ids: tuple[str, ...] | None = None
@@ -88,6 +90,12 @@ def load_lan_config(path: str | Path) -> LanConfig:
     max_images = int(data.get("max_images", 4))
     if not 1 <= max_images <= 20:
         raise LanConfigError("max_images 必须在 1 到 20 之间")
+    max_document_bytes = data.get('max_document_bytes', 20 * 1024 * 1024)
+    max_documents = data.get('max_documents', 5)
+    if type(max_document_bytes) is not int or not 1 <= max_document_bytes <= 20 * 1024 * 1024:
+        raise LanConfigError('max_document_bytes 必须是 1 到 20971520 的整数')
+    if type(max_documents) is not int or not 1 <= max_documents <= 20:
+        raise LanConfigError('max_documents 必须是 1 到 20 的整数')
     if "session_ids" in data and "session_id" in data:
         raise LanConfigError("session_ids 与旧版 session_id 不能同时配置")
     if "session_ids" in data:
@@ -154,6 +162,8 @@ def load_lan_config(path: str | Path) -> LanConfig:
         turn_timeout_seconds=timeout,
         max_image_bytes=max_image_bytes,
         max_images=max_images,
+        max_document_bytes=max_document_bytes,
+        max_documents=max_documents,
         log_level=str(data.get("log_level", "INFO")).upper(),
         preview_roots=tuple(preview_roots),
         session_ids=session_ids,

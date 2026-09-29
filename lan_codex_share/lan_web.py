@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from .lan_access import AccessDenied, is_lan_client, normalize_public_origin, normalize_entry_origins, request_origin, validate_mutating_request
 from .lan_store import ImageStore, ImageValidationError
+from .document_store import DocumentStore, MAX_TOTAL_BYTES
 from .workspace_files import WorkspaceFileError, WorkspaceFilePreview, WorkspaceFileViewer
 from .dynamic_proxy import ProxyError, check_browser_origin, forward, parse_target
 from .static_assets import StaticAssets
@@ -60,6 +61,7 @@ class LanWebApplication:
         allowed_hosts: set[str],
         *,
         max_request_bytes: int,
+        document_store: DocumentStore | None = None,
         workspace: str | Path | None = None,
         preview_roots: tuple[Path, ...] = (),
         password: str = "",
@@ -73,6 +75,7 @@ class LanWebApplication:
     ):
         self.service = service
         self.image_store = image_store
+        self.document_store = document_store
         self.allowed_hosts = allowed_hosts
         self.max_request_bytes = max_request_bytes
         self.csrf_token = secrets.token_urlsafe(32)
@@ -154,19 +157,19 @@ class LanRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format_string: str, *args: Any) -> None:
         self.app.logger.info("HTTP %s %s", self.client_address[0], format_string % args)
 
-    def _security_headers(self, cache_control: str = "no-store") -> None:
+    def _security_headers(self, cache_control: str = "no-store", *, frame_options: str = "DENY") -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Frame-Options", frame_options)
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cache-Control", cache_control)
 
-    def _send_bytes(self, status: int, body: bytes, content_type: str, headers: dict[str, str] | None = None, *, cache_control: str = "no-store") -> None:
+    def _send_bytes(self, status: int, body: bytes, content_type: str, headers: dict[str, str] | None = None, *, cache_control: str = "no-store", frame_options: str = "DENY") -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         for name, value in (headers or {}).items():
             self.send_header(name, value)
-        self._security_headers(cache_control)
+        self._security_headers(cache_control, frame_options=frame_options)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -258,6 +261,14 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                         "required": self.app.password_required,
                         "authenticated": self.app.is_authenticated(self.headers.get("Cookie", "")),
                         "notify_on_task_complete": self.app.notify_on_task_complete,
+                        "upload_limits": {
+                            "max_image_bytes": self.app.image_store.max_bytes,
+                            "max_images": self.app.image_store.max_images,
+                            "max_document_bytes": self.app.document_store.max_bytes if self.app.document_store else 0,
+                            "max_documents": self.app.document_store.max_documents if self.app.document_store else 0,
+                            "max_document_total_bytes": MAX_TOTAL_BYTES,
+                            "max_request_bytes": self.app.max_request_bytes,
+                        },
                     },
                     {"X-CSRF-Token": self.app.csrf_token},
                 )
@@ -292,6 +303,25 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 return
             if path.startswith("/api/images/"):
                 self._serve_image(path.rsplit("/", 1)[-1])
+                return
+            if path.startswith('/api/documents/'):
+                if self.app.document_store is None:
+                    raise FileNotFoundError()
+                query = parse_qs(request_url.query, keep_blank_values=True)
+                session_id = self.app.service.resolve_session_id(query.get('session_id', [None])[0])
+                is_preview = path.endswith('/preview')
+                document_id = path[len('/api/documents/'):-len('/preview')] if is_preview else path[len('/api/documents/'):]
+                file_path, record = self.app.document_store.resolve(document_id, session_id)
+                if is_preview and record['extension'] != '.pdf':
+                    self._json(HTTPStatus.OK, self.app.document_store.preview(document_id, session_id))
+                    return
+                disposition = 'inline' if is_preview else 'attachment'
+                mime = 'application/pdf' if is_preview else 'application/octet-stream'
+                if is_preview and not 0 < file_path.stat().st_size <= 20 * 1024 * 1024:
+                    raise ValueError('文件为空或超过预览大小限制')
+                self._send_bytes(HTTPStatus.OK, file_path.read_bytes(), mime, {
+                    'Content-Disposition': disposition + "; filename*=UTF-8''" + quote(record['name'], safe=''),
+                }, frame_options='SAMEORIGIN' if is_preview else 'DENY')
                 return
             if path == "/api/files/view":
                 raw_path = parse_qs(request_url.query, keep_blank_values=True).get("path", [""])[0]
@@ -482,8 +512,24 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 raw_images = payload.get("images", [])
                 if not isinstance(raw_images, list):
                     raise ValueError("images 必须是数组")
-                images = self.app.image_store.save_many(raw_images)
-                message_id = self.app.service.submit(session_id, str(payload.get("text", "")), images, source_ip)
+                raw_documents = payload.get('documents', [])
+                if not isinstance(raw_documents, list):
+                    raise ValueError('documents 必须是数组')
+                if raw_documents and self.app.document_store is None:
+                    raise ValueError('文档上传未启用，请更新并重启 Share')
+                images, documents = [], []
+                try:
+                    images = self.app.image_store.save_many(raw_images)
+                    if raw_documents:
+                        documents = self.app.document_store.save_many(raw_documents)
+                    kwargs = {'documents': documents} if documents else {}
+                    message_id = self.app.service.submit(session_id, str(payload.get("text", "")), images, source_ip, **kwargs)
+                except Exception:
+                    for record in images:
+                        Path(record['path']).unlink(missing_ok=True)
+                    if documents:
+                        self.app.document_store.delete_many(documents)
+                    raise
                 self._json(HTTPStatus.ACCEPTED, {"message_id": message_id})
                 return
             if path == "/api/queue/cancel":

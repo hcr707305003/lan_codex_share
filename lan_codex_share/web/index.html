@@ -167,10 +167,10 @@
           <textarea id="input" rows="2" placeholder="给 Codex 发送消息" autocomplete="off"></textarea>
           <div class="composer-toolbar">
             <div class="composer-left">
-              <label class="icon-button attach-button" for="images" title="添加图片">
-                <svg><use href="#i-paperclip"></use></svg><span class="sr-only">添加图片</span>
-              </label>
-              <input id="images" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+              <button class="icon-button attach-button" type="button" id="attach-files" title="添加图片或文档" aria-label="添加图片或文档">
+                <svg aria-hidden="true"><use href="#i-paperclip"></use></svg>
+              </button>
+              <input id="images" type="file" accept="image/png,image/jpeg,image/webp,.md,.txt,.docx,.pdf" multiple hidden>
               <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
             </div>
             <button class="send-button" id="send" type="button" aria-label="发送消息">

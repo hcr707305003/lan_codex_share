@@ -7,16 +7,19 @@ import queue
 import threading
 import time
 from typing import Any, Callable
+from uuid import uuid4
 
 from .codex_client import CodexClientError, CodexTurnTimeout
 from .session_projection import SessionProjection
+from .document_store import document_input
 
 
 class LanChatService:
-    def __init__(self, codex, projection: SessionProjection, logger=None):
+    def __init__(self, codex, projection: SessionProjection, logger=None, *, document_store=None):
         self.codex = codex
         self.projection = projection
         self.logger = logger
+        self.document_store = document_store
         self.thread_id: str | None = None
         self._queue: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self._queued_lock = threading.RLock()
@@ -261,15 +264,23 @@ class LanChatService:
         self._broadcast()
         return result
 
-    def submit(self, text: str, images: list[dict[str, str]], source_ip: str) -> str:
+    def submit(self, text: str, images: list[dict[str, str]], source_ip: str, *, documents=None) -> str:
         cleaned = text.strip()
-        if not cleaned and not images:
-            raise ValueError("消息文字和图片不能同时为空")
+        documents = documents or []
+        if not cleaned and not images and not documents:
+            raise ValueError("消息文字和附件不能同时为空")
         with self._queued_lock:
             if self._released:
                 raise ValueError("Session 已释放，请先重新连接")
-            pending = self.projection.add_pending(cleaned, images, source_ip)
-            task = {"message": pending, "images": images}
+            message_id = uuid4().hex
+            metadata = None
+            if documents:
+                if self.document_store is None:
+                    raise ValueError('文档上传未启用')
+                self.document_store.bind(self.thread_id, message_id, cleaned, documents)
+                metadata = self.document_store.metadata(self.thread_id, message_id)
+            pending = self.projection.add_pending(cleaned, images, source_ip, message_id, documents=metadata['documents'] if metadata else None)
+            task = {"message": pending, "images": images, "documents": documents}
             self._queued_tasks[str(pending["id"])] = task
             self._queue.put(task)
         self._last_error = None
@@ -303,6 +314,8 @@ class LanChatService:
         return count
 
     def _delete_task_images(self, task: dict[str, Any]) -> None:
+        if self.document_store is not None:
+            self.document_store.delete_many(task.get('documents', []))
         for image in task.get("images", []):
             path = image.get("path")
             if not path:
@@ -417,6 +430,7 @@ class LanChatService:
                 if user_text:
                     items.append({"type": "text", "text": user_text})
                 items.extend({"type": "localImage", "path": str(image["path"])} for image in images)
+                items.extend(document_input(record) for record in task.get('documents', []))
                 source = str(message.get("sourceIp") or "未知")
                 received = str(message.get("createdAt") or datetime.now().astimezone().isoformat(timespec="seconds"))
                 context = {

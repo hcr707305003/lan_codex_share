@@ -2,14 +2,23 @@
 
 import os
 from pathlib import Path
+from importlib.metadata import distribution
 
 
 project_root = Path(SPECPATH)
+document_licenses = []
+for package in ('pypdf', 'defusedxml'):
+    dist = distribution(package)
+    for file in dist.files or []:
+        if 'license' in str(file).lower():
+            source = Path(dist.locate_file(file))
+            if source.is_file():
+                document_licenses.append((str(source), 'licenses/' + package))
 analysis = Analysis(
     [str(project_root / "run_lan_codex_share.py")],
     pathex=[str(project_root)],
     binaries=[],
-    datas=[(str(project_root / "lan_codex_share" / "web"), "lan_codex_share/web")],
+    datas=[(str(project_root / "lan_codex_share" / "web"), "lan_codex_share/web")] + document_licenses,
     hiddenimports=["fcntl"] if os.name != "nt" else [],
     hookspath=[],
     hooksconfig={},

@@ -7,7 +7,7 @@ from importlib.metadata import distribution
 project_root = Path(SPECPATH)
 icon_directory = project_root / 'lan_codex_share' / 'desktop' / 'assets'
 licenses = []
-for package in ("PySide6", "PySide6_Essentials", "shiboken6", "tomlkit", "PyYAML"):
+for package in ("PySide6", "PySide6_Essentials", "shiboken6", "tomlkit", "PyYAML", "pypdf", "defusedxml"):
     dist = distribution(package)
     for file in dist.files or []:
         if "license" in str(file).lower() or "copying" in str(file).lower():

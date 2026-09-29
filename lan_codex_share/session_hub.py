@@ -314,8 +314,11 @@ class LanSessionHub:
             except Exception as exc:
                 self._set_catalog_error(exc)
 
-    def submit(self, session_id: Any, text: str, images: list[dict[str, str]], source_ip: str) -> str:
-        return self._service(session_id)[1].submit(text, images, source_ip)
+    def submit(self, session_id: Any, text: str, images: list[dict[str, str]], source_ip: str, *, documents=None) -> str:
+        service = self._service(session_id)[1]
+        if documents:
+            return service.submit(text, images, source_ip, documents=documents)
+        return service.submit(text, images, source_ip)
 
     def cancel_queued(self, session_id: Any, message_id: str, source_ip: str) -> bool:
         return self._service(session_id)[1].cancel_queued(message_id, source_ip)

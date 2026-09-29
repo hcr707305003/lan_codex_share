@@ -21,5 +21,9 @@ app_server_port = 4500
 turn_timeout_seconds = 1800
 max_image_bytes = 10485760
 max_images = 4
+# 文档仅提取文字：MD/TXT/DOCX/PDF；旧 DOC 需转换，扫描 PDF 需先 OCR。
+# 每文件最多 20 MiB，每条默认 5 个，所有文档合计最多 100 MiB。
+max_document_bytes = 20971520
+max_documents = 5
 log_level = "INFO"
 preview_roots = []

@@ -498,6 +498,20 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .preview img { width: 100%; height: 100%; object-fit: cover; }
 .preview button { position: absolute; top: 3px; right: 3px; display: grid; width: 22px; height: 22px; place-items: center; border: 0; border-radius: 50%; background: rgba(0,0,0,.72); }
 .preview button svg { width: 13px; height: 13px; }
+.document-gallery { display: flex; flex-direction: column; gap: 8px; max-width: 100%; margin-top: 8px; }
+.document-card { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); text-align: left; }
+.previews .document-card { flex: 0 0 280px; max-width: 85vw; }
+.document-type { flex: 0 0 auto; font-size: 11px; font-weight: 600; }
+.document-details { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+.document-name { overflow-wrap: anywhere; font-size: 13px; }
+.document-preview-button { min-width: 0; min-height: 36px; padding: 4px 2px; border: 0; border-radius: 4px; background: transparent; color: var(--text); text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+.document-preview-button:hover:not(:disabled) { color: var(--info); background: var(--surface-hover); }
+.document-preview-button:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.document-preview-button:disabled { color: var(--muted); text-decoration: none; cursor: default; }
+.document-size, .document-warning { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.document-download { flex: 0 0 auto; padding: 10px 4px; font-size: 12px; }
+.document-remove { flex: 0 0 auto; display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 6px; background: transparent; }
+.document-remove svg { width: 16px; height: 16px; }
 .drop-mask { position: absolute; inset: -60px 20px 10px; z-index: 15; display: none; place-items: center; border: 2px dashed var(--info); border-radius: 16px; background: rgba(23,23,23,.94); color: var(--text); font-weight: 650; }
 .composer-region.dragging .drop-mask { display: grid; }
 .footer-status { display: flex; min-height: 25px; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 3px 0; color: var(--muted); font-size: 10px; }
@@ -527,6 +541,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .file-preview-state.error { color: var(--danger); }
 .file-preview-warning { margin: 12px 16px 0; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--warning) 8%, transparent); padding: 8px 10px; color: var(--warning); font-size: 11px; }
 .file-markdown { min-width: 0; max-width: 100%; padding: 20px 24px 48px; overflow-wrap: anywhere; }
+.document-text-preview { min-width: 0; max-width: 100%; margin: 0; padding: 20px 24px 48px; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; font: 13px/1.8 ui-monospace, SFMono-Regular, Consolas, "Microsoft YaHei UI", monospace; }
 .code-view { min-width: max-content; padding: 12px 0 48px; background: #151515; font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, "Microsoft YaHei UI", monospace; tab-size: 4; }
 .code-line { display: grid; min-height: 20px; grid-template-columns: 58px minmax(0, 1fr); }
 .code-line:hover { background: rgba(255,255,255,.035); }

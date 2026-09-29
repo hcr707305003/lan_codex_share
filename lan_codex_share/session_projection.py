@@ -13,7 +13,9 @@ def _now() -> str:
 
 
 class SessionProjection:
-    def __init__(self, upload_directory: str | Path | None = None, max_text_chars: int = 524_288):
+    def __init__(self, upload_directory: str | Path | None = None, max_text_chars: int = 524_288, *, document_store=None):
+        self.document_store = document_store
+        self._document_session_id = None
         self.upload_directory = Path(upload_directory).resolve() if upload_directory else None
         self.max_text_chars = max_text_chars
         self._lock = threading.RLock()
@@ -48,6 +50,7 @@ class SessionProjection:
         self._changed()
 
     def replace_thread(self, thread: dict[str, Any]) -> None:
+        self._document_session_id = thread.get('id')
         normalized = self._normalize_thread(thread)
         with self._lock:
             self._thread = normalized
@@ -140,6 +143,7 @@ class SessionProjection:
         images: list[dict[str, str]],
         source_ip: str,
         message_id: str | None = None,
+        *, documents=None,
     ) -> dict[str, Any]:
         pending = {
             "id": message_id or uuid4().hex,
@@ -151,6 +155,8 @@ class SessionProjection:
             "status": "queued",
         }
         with self._lock:
+            if documents:
+                pending['documents'] = deepcopy(documents)
             self._pending.append(pending)
             self._client_metadata[str(pending["id"])] = deepcopy(pending)
         self._changed()
@@ -326,6 +332,12 @@ class SessionProjection:
         normalized.setdefault("id", str(item.get("id") or uuid4().hex))
         normalized.setdefault("type", str(item.get("type") or "activity"))
         client_id = normalized.get("clientId")
+        if item.get('type') == 'userMessage' and self.document_store is not None:
+            document_metadata = self.document_store.metadata(self._document_session_id, client_id, normalized['id'])
+            if document_metadata:
+                normalized.update(document_metadata)
+                # Hide only the exact message's uploaded text; retain image inputs.
+                normalized['content'] = [part for part in normalized['content'] if part.get('type') != 'text']
         if client_id and str(client_id) in self._client_metadata:
             metadata = self._client_metadata[str(client_id)]
             normalized.update({key: deepcopy(metadata[key]) for key in ("sourceIp", "createdAt", "images") if key in metadata})

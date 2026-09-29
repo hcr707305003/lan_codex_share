@@ -64,6 +64,8 @@ const imageLightboxError = document.getElementById('image-lightbox-error');
 const imageLightboxClose = document.getElementById('image-lightbox-close');
 
 let selectedFiles = [];
+let sendingMessage = false;
+let previewObjectUrls = [];
 let lastVersion = -1;
 let latestSnapshot = null;
 let selectedSessionId = new URL(window.location.href).searchParams.get('session') || '';
@@ -88,8 +90,12 @@ const manuallyExpanded = new Set();
 const manuallyCollapsed = new Set();
 const collapsedProjects = new Set();
 const allowedImageTypes = new Set(['image/png', 'image/jpeg', 'image/webp']);
-const maxImageBytes = 10 * 1024 * 1024;
-const maxImages = 4;
+let maxImageBytes = 10 * 1024 * 1024;
+let maxImages = 4;
+let maxDocumentBytes = 20 * 1024 * 1024;
+let maxDocuments = 5;
+let maxRequestBytes = 256 * 1024 * 1024;
+const documentExtensions = new Set(['md', 'txt', 'docx', 'pdf']);
 const maxRenderedJson = 100 * 1024;
 const bottomRevealThreshold = 160;
 const historyTimeline = new HistoryTimeline({
@@ -215,6 +221,14 @@ async function authenticationStatus() {
   const currentCsrf = response.headers.get('X-CSRF-Token');
   if (currentCsrf) csrf = currentCsrf;
   taskNotifications.setEnabled(result.notify_on_task_complete === true && result.authenticated === true);
+  const limits = result.upload_limits;
+  if (limits) {
+    maxImageBytes = limits.max_image_bytes;
+    maxImages = limits.max_images;
+    maxDocumentBytes = limits.max_document_bytes;
+    maxDocuments = limits.max_documents;
+    maxRequestBytes = limits.max_request_bytes;
+  }
   return result;
 }
 
@@ -584,14 +598,19 @@ function fileDownloadEndpoint(path) {
   return `/api/files/download?${params}`;
 }
 
+function documentEndpoint(reference, preview = false) {
+  const params = new URLSearchParams({session_id: reference.sessionId});
+  return `/api/documents/${encodeURIComponent(reference.documentId)}${preview ? '/preview' : ''}?${params}`;
+}
+
 function setFileDownload(reference = null) {
-  if (!reference?.path) {
+  if (!reference?.path && !reference?.documentId) {
     filePreviewDownload.removeAttribute('href');
     filePreviewDownload.setAttribute('aria-disabled', 'true');
     filePreviewDownload.tabIndex = -1;
     return;
   }
-  filePreviewDownload.href = fileDownloadEndpoint(reference.path);
+  filePreviewDownload.href = reference.documentId ? documentEndpoint(reference) : fileDownloadEndpoint(reference.path);
   filePreviewDownload.setAttribute('aria-disabled', 'false');
   filePreviewDownload.removeAttribute('tabindex');
 }
@@ -660,15 +679,15 @@ async function openFilePreview(reference) {
   appShell.classList.add('preview-open');
   resetOuterLayoutScroll();
   filePreview.setAttribute('aria-hidden', 'false');
-  const filename = reference.path.split(/[\\/]/).pop() || '文件预览';
+  const filename = reference.documentId ? reference.name : reference.path.split(/[\\/]/).pop() || '文件预览';
   filePreviewTitle.textContent = filename;
-  filePreviewPath.textContent = reference.path;
+  filePreviewPath.textContent = reference.documentId ? `上传附件 · ${formatBytes(reference.size)}` : reference.path;
   previewState('正在读取文件…');
   try {
-    const endpoint = fileEndpoint(reference.path);
+    const endpoint = reference.documentId ? documentEndpoint(reference, true) : fileEndpoint(reference.path);
     const response = await fetch(endpoint, {cache: 'no-store'});
-    if (handleUnauthorized(response)) throw new Error('需要密码登录');
     if (requestId !== previewRequestId) return;
+    if (handleUnauthorized(response)) throw new Error('需要密码登录');
     if (!response.ok) {
       let message = '无法读取文件';
       try { message = (await response.json()).error || message; } catch (_) { /* keep generic error */ }
@@ -680,12 +699,15 @@ async function openFilePreview(reference) {
       const data = await response.json();
       if (requestId !== previewRequestId) return;
       filePreviewTitle.textContent = data.name || filename;
-      filePreviewPath.textContent = `${data.relativePath || reference.path} · ${formatBytes(data.size)}`;
+      filePreviewPath.textContent = `${reference.documentId ? '上传附件' : data.relativePath || reference.path} · ${formatBytes(data.size)}`;
       if (data.encodingWarning) filePreviewBody.append(previewWarning('文件不是有效 UTF-8，无法解码的字节已替换显示。'));
+      if (data.warning) filePreviewBody.append(previewWarning(data.warning));
       if (data.kind === 'markdown') {
         const markdown = renderMarkdown(data.content || '');
         markdown.classList.add('file-markdown');
         filePreviewBody.append(markdown);
+      } else if (reference.documentId) {
+        filePreviewBody.append(el('pre', 'document-text-preview', data.content || ''));
       } else {
         renderCodePreview(data.content || '', reference);
       }
@@ -697,6 +719,9 @@ async function openFilePreview(reference) {
         image.alt = filename;
         filePreviewBody.append(image);
       } else if (contentType.includes('application/pdf')) {
+        // The embedded viewer makes its own request; do not download a second copy here.
+        response.body?.cancel().catch(() => {});
+        filePreviewBody.append(previewWarning('若浏览器无法内嵌显示 PDF，请使用右上角下载按钮查看原文件。'));
         const object = document.createElement('object');
         object.className = 'file-preview-pdf';
         object.data = endpoint;
@@ -719,8 +744,10 @@ function closeFilePreview() {
   previewRequestId += 1;
   const returnFocus = previewReturnFocus;
   previewReturnFocus = null;
+  currentFileReference = null;
   setFileDownload();
   filePreviewBody.blur();
+  filePreviewBody.replaceChildren();
   appShell.classList.remove('preview-open');
   filePreview.setAttribute('aria-hidden', 'true');
   resetOuterLayoutScroll();
@@ -785,6 +812,23 @@ function renderUserMessage(item) {
   if (text) article.append(el('div', 'user-bubble', text));
   const images = imageRecords(item);
   if (images.length) article.append(renderGallery(images));
+  if (item.documents?.length) {
+    const files = el('div', 'document-gallery');
+    for (const record of item.documents) {
+      const reference = {documentId: record.id, sessionId: selectedSessionId || latestSnapshot?.thread_id || '', name: record.name, size: record.size};
+      const card = documentCard(record, () => openFilePreview(reference));
+      if (record.missing) card.append(el('span', 'document-warning', '文件已不存在'));
+      else {
+        const download = el('a', 'document-download', '下载原文件');
+        download.href = documentEndpoint(reference);
+        download.download = record.name;
+        download.setAttribute('aria-label', `下载 ${record.name}`);
+        card.append(download);
+      }
+      files.append(card);
+    }
+    article.append(files);
+  }
   if (item.status && statusValue(item.status) !== 'completed') {
     const footer = el('div', 'message-pending-footer');
     footer.append(el('span', `message-state ${statusValue(item.status)}`, stateLabel(item.status)));
@@ -811,11 +855,13 @@ function renderQueue(pending) {
     const content = el('div', 'queue-content');
     const text = userText(item).trim();
     const images = imageRecords(item);
-    content.append(el('div', 'queue-text', text || (images.length ? `图片消息（${images.length} 张）` : '空消息')));
+    const documents = item.documents || [];
+    content.append(el('div', 'queue-text', text || (documents.length ? documents.map(file => file.name).join('、') : images.length ? `图片消息（${images.length} 张）` : '空消息')));
     const meta = el('div', 'queue-meta');
     meta.append(el('span', 'queue-source', item.sourceIp || '用户'));
     if (item.createdAt) meta.append(el('span', '', displayTime(item.createdAt)));
     if (images.length) meta.append(el('span', '', `${images.length} 张图片`));
+    if (documents.length) meta.append(el('span', '', `${documents.length} 个文档`));
     content.append(meta);
     row.append(content);
 
@@ -1370,19 +1416,27 @@ function fileToPayload(file) {
 }
 
 function renderPreviews() {
+  previewObjectUrls.forEach(url => URL.revokeObjectURL(url));
+  previewObjectUrls = [];
   previews.replaceChildren();
   selectedFiles.forEach((file, index) => {
-    const card = el('div', 'preview');
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(file);
-    img.alt = file.name || `待发送图片 ${index + 1}`;
-    img.onload = () => URL.revokeObjectURL(img.src);
+    const isDocument = documentExtensions.has(fileExtension(file));
+    const card = isDocument ? documentCard(file) : el('div', 'preview');
+    if (!isDocument) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(file);
+      previewObjectUrls.push(img.src);
+      img.alt = file.name || `待发送图片 ${index + 1}`;
+      card.append(img);
+    }
     const remove = el('button');
     remove.type = 'button';
+    remove.className = isDocument ? 'document-remove' : '';
+    remove.disabled = sendingMessage;
     remove.setAttribute('aria-label', `移除 ${file.name || '图片'}`);
     remove.append(icon('close'));
     remove.addEventListener('click', () => { selectedFiles.splice(index, 1); renderPreviews(); updateSendState(); });
-    card.append(img, remove);
+    card.append(remove);
     previews.append(card);
   });
 }
@@ -1390,20 +1444,53 @@ function renderPreviews() {
 function updateSendState() {
   autoGrow();
   const connected = (latestSnapshot?.connection || 'connected') === 'connected';
-  sendButton.disabled = !connected || (!input.value.trim() && !selectedFiles.length);
+  sendButton.disabled = sendingMessage || !connected || (!input.value.trim() && !selectedFiles.length);
+}
+
+function fileExtension(file) { return String(file.name || '').split('.').pop().toLowerCase(); }
+
+function fileSize(bytes) {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.ceil(bytes / 1024))} KB`;
+}
+
+function documentCard(file, onPreview = null) {
+  const card = el('div', 'document-card');
+  card.append(el('span', 'document-type', fileExtension(file).toUpperCase()));
+  const details = el('div', 'document-details');
+  const name = el(onPreview ? 'button' : 'span', `document-name${onPreview ? ' document-preview-button' : ''}`, file.name);
+  name.title = file.name;
+  if (onPreview) {
+    name.type = 'button';
+    name.disabled = Boolean(file.missing);
+    name.setAttribute('aria-label', `预览 ${file.name}`);
+    name.addEventListener('click', onPreview);
+  }
+  details.append(name, el('span', 'document-size', fileSize(file.size)));
+  if (file.warning) details.append(el('span', 'document-warning', file.warning));
+  card.append(details);
+  return card;
 }
 
 function addImageFiles(files) {
+  if (sendingMessage) return;
   const all = Array.from(files || []);
-  const candidates = all.filter(file => allowedImageTypes.has(file.type));
-  const accepted = candidates.filter(file => file.size <= maxImageBytes);
-  const available = Math.max(0, maxImages - selectedFiles.length);
-  selectedFiles.push(...accepted.slice(0, available));
+  const errors = [];
+  let added = 0;
+  for (const file of all) {
+    const isDocument = documentExtensions.has(fileExtension(file));
+    const isImage = !isDocument && allowedImageTypes.has(file.type);
+    const count = selectedFiles.filter(item => documentExtensions.has(fileExtension(item)) === isDocument).length;
+    const documentBytes = selectedFiles.filter(item => documentExtensions.has(fileExtension(item))).reduce((sum, item) => sum + item.size, 0);
+    const wireBytes = [...selectedFiles, file].reduce((sum, item) => sum + Math.ceil(item.size / 3) * 4, 1024 * 1024);
+    if (!isDocument && !isImage) errors.push(`${file.name}：支持图片、MD、TXT、DOCX、PDF；旧 DOC 请转为 DOCX。`);
+    else if (!file.size || file.size > (isDocument ? maxDocumentBytes : maxImageBytes)) errors.push(`${file.name}：文件为空或超过 ${fileSize(isDocument ? maxDocumentBytes : maxImageBytes)}。`);
+    else if (count >= (isDocument ? maxDocuments : maxImages)) errors.push(`每条消息最多 ${maxDocuments} 个文档、${maxImages} 张图片。`);
+    else if ((isDocument && documentBytes + file.size > 100 * 1024 * 1024) || wireBytes > maxRequestBytes) errors.push('本条消息附件总大小超限，请分条发送。');
+    else { selectedFiles.push(file); added += 1; }
+  }
   renderPreviews(); updateSendState();
-  if (all.length !== candidates.length) setNotice('仅支持 PNG、JPEG 和 WebP 图片。', true);
-  else if (candidates.length !== accepted.length) setNotice('单张图片不能超过 10 MB。', true);
-  else if (accepted.length > available) setNotice('每条消息最多选择 4 张图片。', true);
-  else if (accepted.length) setNotice(`已加入 ${Math.min(accepted.length, available)} 张图片。`);
+  if (errors.length) setNotice(errors.join(' '), true);
+  else if (added) setNotice(`已加入 ${added} 个附件。文档仅提取文字，扫描 PDF 需先 OCR。`);
 }
 
 function autoGrow() {
@@ -1412,13 +1499,20 @@ function autoGrow() {
 }
 
 async function sendCurrentMessage() {
+  if (sendingMessage || sendButton.disabled) return;
   const text = input.value.trim();
-  if (!text && !selectedFiles.length) return setNotice('请输入文字或选择图片。', true);
-  sendButton.disabled = true;
-  setNotice('正在上传并加入队列…');
+  if (!text && !selectedFiles.length) return setNotice('请输入文字或选择附件。', true);
+  const targetSession = selectedSessionId || null;
+  const files = [...selectedFiles];
+  sendingMessage = true;
+  input.disabled = imageInput.disabled = true;
+  renderPreviews(); updateSendState();
+  sendButton.setAttribute('aria-busy', 'true');
+  setNotice('正在上传、校验文档并加入队列…');
   try {
-    const images = await Promise.all(selectedFiles.map(fileToPayload));
-    await mutate('/api/messages', {text, images});
+    const images = await Promise.all(files.filter(file => !documentExtensions.has(fileExtension(file))).map(fileToPayload));
+    const documents = await Promise.all(files.filter(file => documentExtensions.has(fileExtension(file))).map(fileToPayload));
+    await mutateForSession('/api/messages', targetSession, {text, images, documents});
     input.value = '';
     imageInput.value = '';
     selectedFiles = [];
@@ -1428,6 +1522,10 @@ async function sendCurrentMessage() {
   } catch (error) {
     setNotice(error.message, true);
   } finally {
+    sendingMessage = false;
+    input.disabled = imageInput.disabled = false;
+    sendButton.removeAttribute('aria-busy');
+    renderPreviews();
     updateSendState();
   }
 }
@@ -1437,6 +1535,10 @@ function closeModelPanel() { modelPanel.hidden = true; modelToggle.setAttribute(
 function closeSidebar() { sidebar.classList.remove('open'); mobileScrim.hidden = true; }
 
 function selectSession(next) {
+  if (sendingMessage) {
+    sessionSelect.value = selectedSessionId;
+    return setNotice('附件正在发送，请完成后再切换会话。');
+  }
   if (!next || next === selectedSessionId) return;
   taskNotifications.reset();
   selectedSessionId = next;
@@ -1464,6 +1566,7 @@ function selectSession(next) {
 sessionSelect.addEventListener('change', () => selectSession(sessionSelect.value));
 
 imageInput.addEventListener('change', () => { addImageFiles(imageInput.files); imageInput.value = ''; });
+document.getElementById('attach-files').addEventListener('click', () => { if (!sendingMessage) imageInput.click(); });
 sendButton.addEventListener('click', sendCurrentMessage);
 input.addEventListener('input', updateSendState);
 input.addEventListener('compositionstart', () => { composing = true; });
