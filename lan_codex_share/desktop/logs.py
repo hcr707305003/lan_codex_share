@@ -36,6 +36,10 @@ class LogBuffer:
         return re.sub(r'''(?i)(["']?(?:auth\.)?(?:password|token|secret|credential)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)''',
                       r"\1[已隐藏]", text)
 
+    def secret_values(self) -> list[str]:
+        with self._lock:
+            return list(self._secrets)
+
     def add(self, source: str, text: str) -> None:
         with self._lock:
             for line in self.redact(text).splitlines():

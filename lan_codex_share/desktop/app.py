@@ -109,5 +109,5 @@ def main(argv=None):
     with console_interrupts(window):
         window.show()
         if args.smoke_test:
-            QTimer.singleShot(300, window.close)
+            QTimer.singleShot(300, window.request_exit)
         return app.exec()

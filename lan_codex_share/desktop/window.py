@@ -5,12 +5,13 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import uuid
 
 from PySide6.QtCore import QTimer, Signal, QUrl, Qt
 from PySide6.QtGui import QDesktopServices, QTextCursor, QFontDatabase
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
                               QPushButton, QStackedWidget, QPlainTextEdit, QLineEdit, QComboBox,
-                              QFileDialog, QScrollArea, QApplication, QSizePolicy)
+                              QFileDialog, QScrollArea, QApplication, QSizePolicy, QSystemTrayIcon, QMenu)
 
 from ..lan_config import load_lan_config
 from .app import distribution_directory
@@ -25,6 +26,7 @@ from .external_tunnels import inspect_tunnels
 from .tunnel_monitor import ExternalTunnelMonitor
 from .entries import service_entries, safe_web_url
 from .dialogs import confirm_stop
+from .close_dialog import CloseDialog
 from .messages import MessageBox as QMessageBox
 from .theme import apply_theme, set_tone
 from .appearance import AppearanceDialog
@@ -42,6 +44,7 @@ def label(text, style=None):
 
 class DesktopWindow(QMainWindow):
     started = Signal(str, str)
+    detached_services = Signal(str)
 
     def __init__(self, config_path: Path):
         super().__init__()
@@ -57,6 +60,19 @@ class DesktopWindow(QMainWindow):
         self.failures = {}
         self.changed_services = set()
         self.exiting = False
+        self.detaching = False
+        self.exit_preserving = False
+        self.detached_services.connect(self.detach_finished)
+        self.exit_requested = False
+        self.choosing_close = False
+        self.tray = QSystemTrayIcon(app_icon(), self)
+        self.tray.setToolTip('LAN Codex Share · 后台服务控制台')
+        self.tray_menu = QMenu(self)
+        self.tray_menu.addAction('打开控制台', self.restore_window)
+        self.tray_menu.addSeparator()
+        self.tray_menu.addAction('停止本客户端服务并退出…', self.request_exit)
+        self.tray.setContextMenu(self.tray_menu)
+        self.tray.activated.connect(self.tray_activated)
         self.paused = False
         self.last_generation = -1
         self.shown_lines = []
@@ -360,6 +376,8 @@ class DesktopWindow(QMainWindow):
         return [binary, 'tunnel', '--config', str(config), 'run'], config.parent, False
 
     def toggle_service(self, name):
+        if self.detaching:
+            return
         if name == 'frpc' and (self.tunnels.busy or self.confirming_frpc):
             return
         service = self.services[name]
@@ -430,7 +448,16 @@ class DesktopWindow(QMainWindow):
                     external = inspect_tunnels(self.settings)[name]
                     if external.status != 'stopped':
                         raise ValueError('未启动新隧道：' + external.message)
-                service.start(argv, cwd, controlled=controlled)
+                if getattr(sys, 'frozen', False):
+                    binary = distribution_directory() / ('lan_codex_share.exe' if os.name == 'nt' else 'lan_codex_share')
+                    if not binary.is_file():
+                        raise ValueError('发行目录缺少配套 lan_codex_share 程序')
+                    supervisor = [str(binary), '_desktop-supervisor']
+                else:
+                    supervisor = [sys.executable, '-u', '-m', 'lan_codex_share.desktop.supervisor']
+                log_directory = self.config_path.parent / 'runtime' / 'desktop' / 'services' / (name + '-' + uuid.uuid4().hex)
+                service.start_supervised(argv, cwd, controlled=controlled, supervisor=supervisor,
+                                         supervisor_cwd=distribution_directory(), log_directory=log_directory)
                 self.started.emit(name, '')
             except Exception as exc:
                 message = str(exc) if isinstance(exc, ValueError) else '启动失败，请检查程序、配置文件、权限与依赖'
@@ -549,7 +576,68 @@ class DesktopWindow(QMainWindow):
             except OSError:
                 QMessageBox.warning(self, '导出失败', '无法写入所选文件，请检查目录权限。')
 
+    def restore_window(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            self.restore_window()
+
+    def request_exit(self):
+        self.restore_window()
+        self.exit_requested = True
+        try:
+            self.close()
+        finally:
+            self.exit_requested = False
+
+    def detach_finished(self, error):
+        self.detaching = False
+        self.setEnabled(True)
+        if error:
+            QMessageBox.warning(self, '未退出控制台', error)
+            return
+        self.exit_preserving = True
+        self.close()
+
+    def detach_services(self):
+        if self.components.busy:
+            QMessageBox.information(self, '组件操作进行中', '请先完成或取消组件下载，再仅退出控制台。')
+            return
+        if not all(service.can_detach() for service in self.services.values()):
+            QMessageBox.warning(self, '暂不能保留服务退出', '存在旧方式启动或正在停止的服务。请保留窗口或隐藏到托盘；不会替你重启服务。')
+            return
+        self.detaching = True
+        self.setEnabled(False)
+        self.logs.add('Client', '正在确认服务独立运行，确认完成后退出控制台。')
+
+        def work():
+            try:
+                for service in self.services.values():
+                    service.detach()
+                error = ''
+            except Exception:
+                error = '部分服务未确认独立运行，控制台保持打开。已确认的服务仍在运行，可重试或使用托盘模式。'
+            self.detached_services.emit(error)
+        threading.Thread(target=work, daemon=True).start()
+
     def closeEvent(self, event):
+        if getattr(self, 'exit_preserving', False):
+            self.timer.stop()
+            self.external.close()
+            self.tunnels.close()
+            self.logs.close()
+            self.tray.hide()
+            event.accept()
+            return
+        if getattr(self, 'detaching', False):
+            event.ignore()
+            return
+        if self.choosing_close:
+            event.ignore()
+            return
         if self.external.busy or self.confirming_external or self.tunnels.busy or self.confirming_frpc:
             QMessageBox.information(self, '关闭操作进行中', '请等待外部服务关闭操作或确认对话框结束。')
             event.ignore()
@@ -558,6 +646,31 @@ class DesktopWindow(QMainWindow):
             QMessageBox.information(self, '启动中', '请等待当前启动操作结束后再关闭。')
             event.ignore()
             return
+        if not self.exiting and not self.exit_requested:
+            available = QSystemTrayIcon.isSystemTrayAvailable()
+            running = any(service.snapshot()['running'] for service in self.services.values())
+            if available or running or self.components.busy:
+                self.choosing_close = True
+                try:
+                    choice = CloseDialog(self, available).exec()
+                finally:
+                    self.choosing_close = False
+                if choice == CloseDialog.BACKGROUND:
+                    if not QSystemTrayIcon.isSystemTrayAvailable():
+                        event.ignore()
+                        return
+                    self.tray.show()
+                    self.hide()
+                    event.ignore()
+                    return
+                if choice == CloseDialog.DETACH:
+                    if self.config_page.discard() and self.components.discard():
+                        self.detach_services()
+                    event.ignore()
+                    return
+                if choice != CloseDialog.Accepted:
+                    event.ignore()
+                    return
         if not self.exiting and not self.config_page.discard():
             event.ignore()
             return
@@ -584,4 +697,5 @@ class DesktopWindow(QMainWindow):
         self.external.close()
         self.tunnels.close()
         self.logs.close()
+        self.tray.hide()
         event.accept()

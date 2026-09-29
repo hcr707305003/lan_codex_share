@@ -183,7 +183,7 @@ def test_window_exit_confirmation_only_stops_owned_services(ui, monkeypatch):
         patch.setattr(window_module, 'confirm_stop', lambda *a, **kw: True)
         # ServiceProcess.stop is a no-op for unowned/stopped services.
         patch.setattr(service, 'stop', lambda: stopped.append('frpc'))
-        window.close()
+        window.request_exit()
     assert stopped == ['frpc']
     window.exiting = False
 

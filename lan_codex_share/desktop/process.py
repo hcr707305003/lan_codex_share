@@ -23,8 +23,10 @@ class ServiceProcess:
         self._stopping_at: float | None = None
         self._lock = threading.RLock()
         self._owned = []
+        self._detachable = False
+        self._detached = threading.Event()
 
-    def start(self, argv: list[str], cwd: Path, *, controlled: bool = False) -> None:
+    def start(self, argv: list[str], cwd: Path, *, controlled: bool = False, independent: bool = False) -> None:
         with self._lock:
             if self._process and self._process.poll() is None:
                 raise ValueError("服务已启动，请勿重复启动")
@@ -33,13 +35,46 @@ class ServiceProcess:
             process = subprocess.Popen(argv, cwd=cwd, env=env, shell=False,
                                        stdin=subprocess.PIPE if controlled else subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+                                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                                       start_new_session=independent and os.name != 'nt')
             self._process = process
             self._controlled, self._ready, self._stopping_at = controlled, False, None
             self._owned = []
+            self._detachable = False
+            self._detached.clear()
             for stream, events in ((process.stdout, controlled), (process.stderr, False)):
                 threading.Thread(target=self._read, args=(process, stream, events), daemon=True).start()
             self.logs.add(self.name, "进程已创建，等待就绪" if controlled else "进程已创建；不代表公网已连通")
+
+    def start_supervised(self, argv, cwd, *, controlled, supervisor, supervisor_cwd, log_directory):
+        self.start(supervisor, supervisor_cwd, controlled=True, independent=True)
+        try:
+            payload = {'argv': argv, 'cwd': str(cwd), 'controlled': controlled,
+                       'name': self.name, 'logs': str(log_directory),
+                       'secrets': self.logs.secret_values()}
+            self._process.stdin.write((json.dumps(payload) + '\n').encode('utf-8'))
+            self._process.stdin.flush()
+            self._detachable = True
+        except Exception:
+            self.force_stop()
+            raise
+
+    def can_detach(self):
+        state = self.snapshot()
+        return not state['running'] or (self._detachable and not state['stopping'])
+
+    def detach(self, timeout=5):
+        with self._lock:
+            if not self.snapshot()['running']:
+                return
+            if not self.can_detach():
+                raise ValueError('服务使用旧启动方式或正在停止，不能安全脱离；请保留控制台或使用托盘模式。')
+            if self._detached.is_set():
+                return
+            self._process.stdin.write(b'{"command":"detach"}\n')
+            self._process.stdin.flush()
+        if not self._detached.wait(timeout):
+            raise ValueError('服务未确认独立运行，控制台保持打开；请检查日志后重试。')
 
     def _read(self, process, stream, events):
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
@@ -77,6 +112,13 @@ class ServiceProcess:
         if events:
             try:
                 message = json.loads(line)
+                if isinstance(message, dict) and message.get('desktop_event') == 'detached':
+                    if self._process is process:
+                        self._detached.set()
+                    return
+                if isinstance(message, dict) and message.get('desktop_event') == 'log':
+                    self.logs.add(self.name, str(message.get('text', '')))
+                    return
                 if isinstance(message, dict) and message.get('desktop_event') == 'owned':
                     verified = []
                     for identity in message.get('processes', []):
@@ -95,7 +137,7 @@ class ServiceProcess:
                     with self._lock:
                         if self._process is process:
                             self._ready = True
-                    self.logs.add(self.name, "Share 已成功监听，可以访问")
+                    self.logs.add(self.name, "Share 已成功监听，可以访问" if self.name == 'Share' else "服务进程已启动；不代表公网已连通")
                     return
             except ValueError:
                 pass

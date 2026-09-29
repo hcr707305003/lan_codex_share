@@ -80,6 +80,9 @@ def main(
 ) -> int:
     configure_console()
     args = list(sys.argv[1:] if argv is None else argv)
+    if args == ['_desktop-supervisor']:
+        from .desktop.supervisor import run_supervisor
+        return run_supervisor()
     if len(args) == 2 and args[0] == "_desktop-worker":
         from .desktop.worker import run_worker
         return run_worker(Path(args[1]).resolve())
