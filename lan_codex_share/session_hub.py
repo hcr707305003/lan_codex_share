@@ -220,6 +220,13 @@ class LanSessionHub:
             return selected, service
 
     def snapshot(self, session_id: Any = None, history_limit: int | None = None, before: str | None = None) -> dict[str, Any]:
+        # Membership fallback and lookup must be atomic with remove_shared().
+        # Otherwise an SSE reader can validate an ID, wait for removal, then
+        # attempt to load the now-removed session and break its live stream.
+        with self._service_create_lock:
+            return self._snapshot_locked(session_id, history_limit, before)
+
+    def _snapshot_locked(self, session_id, history_limit, before):
         if self._fixed_ids is not None and isinstance(session_id, str) and session_id not in self.thread_ids:
             session_id = None
         if session_id is None:

@@ -133,6 +133,45 @@ def test_remove_serializes_submit_and_reconnect(tmp_path):
     assert not service.calls and not service.reconnected
 
 
+@pytest.mark.parametrize('keep_another', [False, True])
+def test_snapshot_waiting_during_removal_falls_back_atomically(tmp_path, keep_another):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    path, store, tasks, hub, client = setup(tmp_path)
+    sid = client.threads[0]['id']
+    tasks.add(sid)
+    remaining = str(uuid4())
+    if keep_another:
+        client.threads.append({'id': remaining, 'name': 'remaining', 'cwd': str(tmp_path)})
+        tasks.add(remaining)
+    entered = threading.Event()
+    owner = threading.get_ident()
+    original = hub._service_create_lock
+
+    class ObservedLock:
+        def __enter__(self):
+            if threading.get_ident() != owner:
+                entered.set()
+            original.acquire()
+
+        def __exit__(self, *args):
+            original.release()
+
+    hub._service_create_lock = ObservedLock()
+    try:
+        with ThreadPoolExecutor(1) as executor:
+            with hub._service_create_lock:
+                pending = executor.submit(hub.snapshot, sid)
+                assert entered.wait(2)
+                tasks.remove(sid, 'test')
+            snapshot = pending.result(2)
+        assert snapshot['selected_session_id'] == (remaining if keep_another else None)
+        assert sid not in [entry['thread_id'] for entry in snapshot['sessions']]
+    finally:
+        hub.close()
+
+
 def test_config_mode_legacy_and_invalid(tmp_path):
     path, store, tasks, hub, client = setup(tmp_path)
     for text, auto, all_sessions in [
