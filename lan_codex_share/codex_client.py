@@ -539,6 +539,16 @@ class CodexClient:
         return self.ensure_thread(force_new=True)
 
     def _on_notification(self, method: str, params: dict[str, Any]) -> None:
+        # A shared App Server can broadcast other sessions' notifications.
+        # Filter before forwarding to projections/settings or updating turn state.
+        incoming_thread = params.get('threadId')
+        if incoming_thread is not None:
+            if not self.state.thread_id or str(incoming_thread) != str(self.state.thread_id):
+                return
+        elif self.remote_url and (method.startswith(('thread/', 'turn/', 'item/')) or method == 'error'):
+            # Unscoped events cannot safely belong to a session on a shared server.
+            # Keep legacy unscoped notifications supported for private stdio servers.
+            return
         if method == "thread/settings/updated":
             self._capture_thread_settings(params.get("threadSettings"))
         for handler in list(self._notification_handlers):

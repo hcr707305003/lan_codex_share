@@ -35,6 +35,7 @@ class LanSessionHub:
         self.profiles = None
         self._added_factory = None
         self._catalog_by_id: dict[str, dict[str, Any]] = {}
+        self._thread_names: dict[str, dict[str, Any]] = {}
         self._session_errors: dict[str, str] = {}
         self._catalog_error: str | None = None
         self._default_session_id: str | None = None
@@ -76,6 +77,7 @@ class LanSessionHub:
                 self._services_by_id.pop(sid, None)
                 self._added_by_id.pop(sid, None)
                 self._catalog_by_id.pop(sid, None)
+                self._thread_names.pop(sid, None)
                 self._session_errors.pop(sid, None)
                 self.fix_membership(remaining)
             if service is not None:
@@ -159,6 +161,11 @@ class LanSessionHub:
             self._default_session_id = next(iter(mapped), None)
         self._restore_tasks()
         self._broadcast()
+        if self.tasks and hasattr(self.tasks.client, 'list_threads'):
+            self._stop.clear()
+            self._refresh_thread = threading.Thread(target=self._refresh_loop,
+                name='lan-session-metadata', daemon=True)
+            self._refresh_thread.start()
 
     def resolve_session_id(self, session_id: Any = None) -> str:
         if session_id is not None and not isinstance(session_id, str):
@@ -235,6 +242,8 @@ class LanSessionHub:
                     return self._empty_snapshot()
         selected, service = self._service(session_id)
         snapshot = service.snapshot() if history_limit is None else service.snapshot(history_limit=history_limit, before=before)
+        snapshot['thread'] = dict(snapshot.get('thread') or {})
+        self._apply_name(selected, snapshot['thread'])
         snapshot["selected_session_id"] = selected
         snapshot["sessions"] = self.session_summaries()
         snapshot["projects"] = self.project_summaries()
@@ -298,6 +307,7 @@ class LanSessionHub:
                         "connection": "not_loaded",
                         "queue_size": 0,
                     }
+                self._apply_name(thread_id, value, summary=True)
                 value.update({
                     "thread_id": thread_id,
                     "cwd": entry.get("cwd") or value.get("cwd"),
@@ -316,6 +326,7 @@ class LanSessionHub:
             if self._fixed_ids is not None and thread_id not in self._fixed_ids:
                 continue
             value = deepcopy(service.summary())
+            self._apply_name(thread_id, value, summary=True)
             value["thread_id"] = thread_id
             summaries.append(value)
         return summaries
@@ -360,6 +371,8 @@ class LanSessionHub:
 
     def refresh_catalog(self) -> None:
         if not self._catalog_mode:
+            if self.tasks and hasattr(self.tasks.client, 'list_threads'):
+                self._refresh_names(self.tasks.client.list_threads())
             return
         raw_threads = self._catalog_client.list_threads()
         mapped: dict[str, dict[str, Any]] = {}
@@ -402,8 +415,42 @@ class LanSessionHub:
             except Exception as exc:
                 if self.logger:
                     self.logger.warning("Cannot close removed Session service: %s", type(exc).__name__)
-        if changed:
+        names_changed = self._refresh_names(raw_threads, broadcast=False)
+        if changed or names_changed:
             self._broadcast()
+
+    def _refresh_names(self, threads, *, broadcast=True):
+        # Metadata only: never resume threads, reload turns or alter membership.
+        with self._lock:
+            shared = set(self.thread_ids)
+            names = {sid: value for sid, value in self._thread_names.items() if sid in shared}
+            for thread in threads:
+                if not isinstance(thread, dict) or thread.get('id') not in shared:
+                    continue
+                if 'name' not in thread:
+                    continue  # Incomplete metadata must not erase a known title.
+                name = thread['name']
+                if name is not None and not isinstance(name, str):
+                    continue
+                value = {'name': name}
+                if isinstance(thread.get('preview'), str):
+                    value['preview'] = thread['preview']
+                names[thread['id']] = value
+            changed = names != self._thread_names or self._catalog_error is not None
+            self._thread_names = names
+            self._catalog_error = None
+        if changed and broadcast:
+            self._broadcast()
+        return changed
+
+    def _apply_name(self, sid, target, *, summary=False):
+        with self._lock:
+            metadata = dict(self._thread_names.get(sid, {}))
+        if metadata:
+            if summary:
+                target['name'] = metadata.get('name') or metadata.get('preview') or sid
+            else:
+                target.update(metadata)
 
     def _set_catalog_error(self, exc: Exception) -> None:
         message = f"无法刷新 Codex Session 目录：{exc}"

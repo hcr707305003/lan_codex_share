@@ -112,6 +112,69 @@ def test_external_turn_updates_busy_state_without_completing_own_turn(tmp_path):
     assert not client._turn_done.is_set()
 
 
+def test_shared_notifications_keep_concurrent_sessions_isolated(tmp_path):
+    clients = []
+    events = [[], []]
+    for index, sid in enumerate(('session-a', 'session-b')):
+        state = StateStore(tmp_path / f'{sid}.json')
+        state.set_thread_id(sid)
+        client = CodexClient(tmp_path, state, command=fake_command(), remote_url='ws://unused')
+        client._starting_turn = True
+        client.add_notification_handler(lambda method, params, target=events[index]: target.append(method))
+        clients.append(client)
+    def broadcast(method, params):
+        for client in clients:
+            client._on_notification(method, params)
+    a, b = clients
+    broadcast('turn/started', {'threadId': 'session-a', 'turn': {'id': 'turn-a'}})
+    broadcast('turn/started', {'threadId': 'session-b', 'turn': {'id': 'turn-b'}})
+    assert a._thread_turn_id == a.active_turn_id == 'turn-a'
+    assert b._thread_turn_id == b.active_turn_id == 'turn-b'
+    broadcast('item/completed', {'threadId': 'session-b', 'turnId': 'turn-b',
+        'item': {'type': 'agentMessage', 'text': 'B only'}})
+    assert a._final_message is None and b._final_message == 'B only'
+    broadcast('thread/settings/updated', {'threadId': 'session-b', 'threadSettings': {'model': 'b-model'}})
+    assert a.model_settings['model'] is None
+    assert 'thread/settings/updated' not in events[0]
+    broadcast('turn/completed', {'threadId': 'session-a', 'turn': {'id': 'turn-a', 'status': 'completed'}})
+    assert not a.thread_busy and a._turn_done.is_set()
+    assert b.thread_busy and not b._turn_done.is_set()
+    broadcast('turn/completed', {'threadId': 'session-b', 'turn': {'id': 'turn-b', 'status': 'completed'}})
+    assert not b.thread_busy and b._turn_done.is_set()
+
+
+def test_shared_server_unscoped_events_do_not_change_session(tmp_path):
+    state = StateStore(tmp_path / 'session.json')
+    state.set_thread_id('session-a')
+    client = CodexClient(tmp_path, state, remote_url='ws://unused', command=fake_command())
+    client._on_notification('turn/started', {'turn': {'id': 'unknown'}})
+    assert not client.thread_busy
+
+
+def test_one_session_queue_runs_while_another_session_is_busy(tmp_path):
+    import threading
+    from lan_codex_share.lan_service import LanChatService
+    from lan_codex_share.session_projection import SessionProjection
+    state = StateStore(tmp_path / 'a.json')
+    state.set_thread_id('session-a')
+    client = CodexClient(tmp_path, state, remote_url='ws://unused', command=fake_command())
+    service = LanChatService(client, SessionProjection())
+    service.thread_id = 'session-a'
+    service.projection.replace_thread({'id': 'session-a', 'turns': []})
+    started = threading.Event()
+    client.run_turn_items = lambda *args, **kwargs: started.set()
+    client._on_notification('turn/started', {'threadId': 'session-a', 'turn': {'id': 'turn-a'}})
+    client._on_notification('turn/started', {'threadId': 'session-b', 'turn': {'id': 'turn-b'}})
+    service._worker.start()
+    try:
+        service.submit('next A task', [], 'test')
+        assert not started.wait(.1)
+        client._on_notification('turn/completed', {'threadId': 'session-a', 'turn': {'id': 'turn-a', 'status': 'completed'}})
+        assert started.wait(2), 'A queue must not wait for B completion'
+    finally:
+        service.close()
+
+
 def test_read_thread_and_public_notification_subscription(tmp_path):
     client = CodexClient(tmp_path, StateStore(tmp_path / "state.json"), turn_timeout_seconds=2, command=fake_command())
     events = []

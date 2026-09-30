@@ -164,6 +164,92 @@ def catalog_thread(thread_id, cwd, project_id, name):
     }
 
 
+def test_rename_updates_loaded_and_unloaded_sessions_without_reloading_history(tmp_path):
+    catalog = FakeCatalogClient([
+        catalog_thread('a', tmp_path, 'project', 'Old A'),
+        catalog_thread('b', tmp_path, 'project', 'Old B'),
+    ])
+    created = []
+    def factory(row):
+        service = FakeSessionService(row['id'], row['name'])
+        created.append(service)
+        return service
+    hub = LanSessionHub(catalog_client=catalog, service_factory=factory, refresh_seconds=3600)
+    hub.start()
+    try:
+        original = hub.snapshot('a')
+        from lan_codex_share.stream_delta import SnapshotDelta
+        stream = SnapshotDelta()
+        stream.next(original)
+        # Added entries must not mask newer catalog names either.
+        hub.register_session(catalog.threads[0])
+        browsers = [hub.subscribe(), hub.subscribe()]
+        catalog.threads[0]['name'] = 'New A'
+        catalog.threads[1]['name'] = 'New B'
+        hub.refresh_catalog()
+        for browser in browsers:
+            browser.get_nowait()
+        updated = hub.snapshot('a')
+        assert updated['thread']['name'] == 'New A'
+        assert [s['name'] for s in updated['sessions']] == ['New A', 'New B']
+        assert [s['name'] for s in updated['projects'][0]['sessions']] == ['New A', 'New B']
+        assert updated['thread']['turns'] == original['thread']['turns']
+        delta = stream.next(updated)
+        assert delta['event'] == 'delta'
+        assert delta['data']['thread_fields']['name'] == 'New A'
+        assert delta['data']['turns'] == []
+        assert len(created) == 1 and not created[0].closed
+        assert created[0].name == 'Old A'  # metadata overlay, no service restart.
+        hub.refresh_catalog()
+        for browser in browsers:
+            with pytest.raises(queue.Empty):
+                browser.get_nowait()
+    finally:
+        hub.close()
+
+
+def test_selected_sessions_poll_names_and_keep_membership():
+    from types import SimpleNamespace
+    service = FakeSessionService('a', 'Old')
+    catalog = FakeCatalogClient([{'id': 'a', 'name': 'New'}, {'id': 'outside', 'name': 'Hidden'}])
+    hub = LanSessionHub([service], refresh_seconds=.1)
+    hub.tasks = SimpleNamespace(client=catalog, restore=lambda: None, close=lambda: None)
+    updates = hub.subscribe()
+    hub.start()
+    try:
+        updates.get(timeout=2)  # startup
+        updates.get(timeout=2)  # background metadata refresh
+        assert hub.snapshot('a')['thread']['name'] == 'New'
+        assert hub.session_summaries()[0]['name'] == 'New'
+        assert hub.thread_ids == ('a',)
+        assert 'outside' not in hub._thread_names
+    finally:
+        hub.close()
+
+
+def test_name_removal_and_failed_refresh_keep_history_and_last_good_name():
+    from types import SimpleNamespace
+    hub = LanSessionHub([FakeSessionService('a', 'Old')], refresh_seconds=3600)
+    hub.start()
+    catalog = FakeCatalogClient([{'id': 'a', 'name': 'New'}])
+    hub.tasks = SimpleNamespace(client=catalog, close=lambda: None)
+    try:
+        hub.refresh_catalog()
+        catalog.error = ValueError('offline')
+        with pytest.raises(ValueError):
+            hub.refresh_catalog()
+        assert hub.snapshot('a')['thread']['name'] == 'New'
+        catalog.error = None
+        catalog.threads = [{'id': 'a', 'name': None, 'preview': 'First message'}]
+        hub.refresh_catalog()
+        assert hub.snapshot('a')['thread']['name'] is None
+        assert hub.session_summaries()[0]['name'] == 'First message'
+        hub._refresh_names([{'id': 'a'}])
+        assert hub.session_summaries()[0]['name'] == 'First message'
+    finally:
+        hub.close()
+
+
 def test_catalog_hub_groups_projects_and_loads_sessions_lazily(tmp_path):
     project_a = tmp_path / "alpha"
     project_b = tmp_path / "beta"
