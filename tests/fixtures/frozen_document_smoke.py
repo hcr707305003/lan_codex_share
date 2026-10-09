@@ -9,6 +9,7 @@ if __name__ == '__main__':
     from pypdf import PdfWriter
     from pypdf.generic import DecodedStreamObject, NameObject, DictionaryObject
     from lan_codex_share.document_extract import extract_isolated
+    from lan_codex_share.archive_worker import run_archive
 
     with tempfile.TemporaryDirectory(prefix='document-frozen-') as temporary:
         root = Path(temporary)
@@ -30,4 +31,21 @@ if __name__ == '__main__':
         pdf = root / 'hello.pdf'
         writer.write(pdf)
         assert 'hello pdf' in extract_isolated(pdf)['text']
-    print('Frozen MD/DOCX/PDF extraction PASS')
+        bundle = root / 'bundle.zip'
+        xlsx = root / 'values.xlsx'
+        with zipfile.ZipFile(xlsx, 'w') as archive:
+            archive.writestr('[Content_Types].xml', '<Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>')
+            archive.writestr('xl/workbook.xml', '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Values" r:id="r1"/></sheets></workbook>')
+            archive.writestr('xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+            archive.writestr('xl/worksheets/sheet1.xml', '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row><c r="A1"><f>2+2</f><v>4</v></c></row></sheetData></worksheet>')
+        with zipfile.ZipFile(bundle, 'w') as archive:
+            archive.write(text, 'docs/hello.md')
+            archive.write(docx, 'docs/hello.docx')
+            archive.write(xlsx, 'docs/values.xlsx')
+        listing = run_archive(str(bundle), 'list')
+        version = listing['version']
+        assert listing['entries'][0]['name'] == 'docs'
+        assert run_archive(str(bundle), 'preview', version=version, member=0)['content'] == 'hello'
+        assert run_archive(str(bundle), 'download', version=version, member=1)['data'] == docx.read_bytes()
+        assert run_archive(str(bundle), 'preview', version=version, member=2)['rows'] == [['4']]
+    print('MD/DOCX/PDF extraction and isolated ZIP roundtrip PASS')

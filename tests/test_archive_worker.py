@@ -27,3 +27,10 @@ def test_busy_and_timeout_release_slots(tmp_path):
         run_archive(str(path), 'list', timeout=0)
     assert exc.value.status == 408
     assert run_archive(str(path), 'list')['entries']
+
+
+def test_child_error_releases_slot(tmp_path):
+    path = make_zip(tmp_path, [('a', 'x')])
+    with pytest.raises(ArchiveError):
+        run_archive(str(path), 'unknown')
+    assert run_archive(str(path), 'list')['entries']

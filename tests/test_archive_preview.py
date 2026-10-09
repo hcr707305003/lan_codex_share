@@ -52,6 +52,20 @@ def test_xml_entity_rejected(tmp_path):
         preview(tmp_path, 'bad.xlsx', xlsx_bytes('<!DOCTYPE x [<!ENTITY x "boom">]><x>&x;</x>'))
 
 
+def test_external_sheet_relationship_is_not_loaded(tmp_path):
+    original = zipfile.ZipFile(BytesIO(xlsx_bytes()))
+    output = BytesIO()
+    with original, zipfile.ZipFile(output, 'w') as modified:
+        for entry in original.infolist():
+            data = original.read(entry)
+            if entry.filename.endswith('workbook.xml.rels'):
+                data = data.replace(b'Target="worksheets/sheet1.xml"',
+                                    b'TargetMode="External" Target="https://example.invalid/sheet.xml"')
+            modified.writestr(entry, data)
+    with pytest.raises(ArchiveError, match='外部'):
+        preview(tmp_path, 'external.xlsx', output.getvalue())
+
+
 @pytest.mark.parametrize('name,data,kind', [('a.md', b'# hi', 'markdown'), ('a.html', b'<script>bad</script>', 'code'),
     ('a.png', b'png', 'image'), ('a.pdf', b'%PDF-1.4', 'pdf'), ('a.zip', b'zip', 'download'), ('a.xlsm', b'macro', 'download')])
 def test_member_types(tmp_path, name, data, kind):

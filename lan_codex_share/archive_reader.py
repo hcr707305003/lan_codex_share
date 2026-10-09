@@ -157,7 +157,16 @@ def read_member(path: str, version: str, member: int) -> dict:
         if names[member].endswith('/'):
             raise ArchiveError('目录不能作为文件下载')
         with archive.open(entry) as stream:
-            data = stream.read(min(entry.file_size, MAX_MEMBER_BYTES) + 1)
-            if len(data) != entry.file_size or len(data) > MAX_MEMBER_BYTES:
+            chunks, count = [], 0
+            while True:
+                chunk = stream.read(min(256 * 1024, MAX_MEMBER_BYTES - count + 1))
+                if not chunk:
+                    break
+                count += len(chunk)
+                if count > MAX_MEMBER_BYTES or count > entry.file_size:
+                    raise ArchiveError('ZIP 成员实际大小与声明不符或超限', 413)
+                chunks.append(chunk)
+            if count != entry.file_size:
                 raise ArchiveError('ZIP 成员实际大小与声明不符或超限', 413)
+            data = b''.join(chunks)
         return {'name': names[member].split('/')[-1], 'size': len(data), 'data': data}
