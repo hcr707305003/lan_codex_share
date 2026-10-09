@@ -66,6 +66,16 @@ test('DOCX and TXT render inert text, not HTML or Markdown', async () => {
   assert.match(c.filePreviewBody.textContent, /原始版式/);
 });
 
+test('workspace archive metadata enables download without rendering binary content', async () => {
+  const c = setup();
+  c.fetch = async () => jsonResponse({name: '导出.zip', kind: 'download', size: 123, content: 'binary'});
+  await c.openFilePreview({path: 'C:/导出.zip'});
+  assert.match(c.filePreviewBody.textContent, /右上角下载/);
+  assert.equal(all(c.filePreviewBody, 'pre').length, 0);
+  assert.equal(c.filePreviewDownload.attrs['aria-disabled'], 'false');
+  assert.match(c.filePreviewDownload.href, /\/api\/files\/download\?/);
+});
+
 test('opening a workspace Markdown after an attachment keeps the existing route and renderer', async () => {
   const c = setup();
   await c.openFilePreview(reference);

@@ -578,6 +578,12 @@ function fileEndpoint(path) {
   return `/api/files/view?${params}`;
 }
 
+let archiveViewer = null;
+function stopArchivePreview() {
+  archiveViewer?.close();
+  archiveViewer = null;
+}
+
 function fileDownloadEndpoint(path) {
   const params = new URLSearchParams({path});
   return `/api/files/download?${params}`;
@@ -655,6 +661,7 @@ function resetOuterLayoutScroll() {
 
 async function openFilePreview(reference) {
   if (!projectProfiles.leave()) return;
+  stopArchivePreview();
   document.getElementById('file-preview-refresh').hidden = false;
   filePreviewDownload.hidden = false;
   if (!appShell.classList.contains('preview-open')) {
@@ -690,7 +697,15 @@ async function openFilePreview(reference) {
       filePreviewPath.textContent = `${reference.documentId ? '上传附件' : data.relativePath || reference.path} · ${formatBytes(data.size)}`;
       if (data.encodingWarning) filePreviewBody.append(previewWarning('文件不是有效 UTF-8，无法解码的字节已替换显示。'));
       if (data.warning) filePreviewBody.append(previewWarning(data.warning));
-      if (data.kind === 'markdown') {
+      if (data.kind === 'archive') {
+        setFileDownload(reference);
+        archiveViewer = ArchivePreview.createArchivePreview({container: filePreviewBody,
+          renderMarkdown, onUnauthorized: handleUnauthorized});
+        await archiveViewer.open(reference);
+        if (requestId !== previewRequestId) return;
+      } else if (data.kind === 'download') {
+        filePreviewBody.append(previewWarning('此文件不支持在线预览，请点击右上角下载按钮保存原文件。'));
+      } else if (data.kind === 'markdown') {
         const markdown = renderMarkdown(data.content || '');
         markdown.classList.add('file-markdown');
         filePreviewBody.append(markdown);
@@ -729,6 +744,7 @@ async function openFilePreview(reference) {
 
 function closeFilePreview() {
   if (!projectProfiles.leave()) return;
+  stopArchivePreview();
   if (!appShell.classList.contains('preview-open')) return;
   previewRequestId += 1;
   const returnFocus = previewReturnFocus;
