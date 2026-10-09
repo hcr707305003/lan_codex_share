@@ -283,7 +283,8 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b".topbar-title-group > div" in stylesheet
         assert b"@container (max-width: 640px)" in stylesheet
         assert b"@media (min-width: 821px) and (max-width: 1199px)" in stylesheet
-        assert b"width: min(640px, calc(100vw - var(--sidebar-width)))" in stylesheet
+        assert b"width: min(var(--preview-width, 640px), calc(100vw - var(--sidebar-width)))" in stylesheet
+        assert b'id="preview-resize"' in page
         assert b".main-panel { width: 100%; max-width: 100vw; height: 100dvh; }" in stylesheet
         assert b"env(safe-area-inset-bottom)" in stylesheet
         assert b".answer table, .file-markdown table" in stylesheet

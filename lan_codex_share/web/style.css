@@ -119,7 +119,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 
 .app-shell.preview-open {
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) minmax(420px, min(45vw, 760px));
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--preview-width, minmax(420px, min(45vw, 760px)));
 }
 
 .sidebar {
@@ -602,6 +602,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .mobile-scrim { display: none; }
 
 .file-preview {
+  position: relative;
   display: none;
   min-width: 0;
   min-height: 0;
@@ -612,6 +613,12 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   box-shadow: -12px 0 34px rgba(0,0,0,.14);
 }
 .app-shell.preview-open .file-preview { display: grid; }
+.preview-resize { position: absolute; inset: 0 auto 0 0; width: 10px; z-index: 3; cursor: col-resize; touch-action: none; outline: none; }
+.preview-resize::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 2px; background: transparent; }
+.preview-resize:hover::after, .preview-resize:focus-visible::after, .preview-resizing .preview-resize::after { background: var(--accent); }
+.preview-resize:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.preview-resizing, .preview-resizing * { cursor: col-resize !important; user-select: none !important; }
+.preview-resizing iframe, .preview-resizing object, .preview-resizing embed { pointer-events: none; }
 .file-preview-header { display: flex; min-height: 62px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px 8px 16px; border-bottom: 1px solid var(--border); }
 .file-preview-heading { min-width: 0; }
 .file-preview-heading strong, .file-preview-heading span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -734,13 +741,14 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
     position: fixed;
     inset: 0 0 0 auto;
     z-index: 50;
-    width: min(640px, calc(100vw - var(--sidebar-width)));
+    width: min(var(--preview-width, 640px), calc(100vw - var(--sidebar-width)));
     height: 100dvh;
     box-shadow: -20px 0 56px rgba(0,0,0,.42);
   }
 }
 
 @media (max-width: 820px) {
+  .preview-resize { display: none; }
   .app-shell { display: block; }
   .app-shell.preview-open { display: block; }
   .main-panel { width: 100%; max-width: 100vw; height: 100dvh; }

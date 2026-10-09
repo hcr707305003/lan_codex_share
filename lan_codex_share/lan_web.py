@@ -255,7 +255,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_bytes(200, asset.body, asset.mime, {"ETag": asset.etag}, cache_control=cache)
                 return
-            if path in {"/app.js", "/history.js", "/realtime.js", "/notifications.js", "/tasks.js", "/profiles.js", "/notice.js", "/archive-preview.js"}:
+            if path in {"/app.js", "/history.js", "/realtime.js", "/notifications.js", "/tasks.js", "/profiles.js", "/notice.js", "/archive-preview.js", "/preview-resize.js"}:
                 self._serve_asset(path[1:], "text/javascript; charset=utf-8")
                 return
             if path == "/style.css":
