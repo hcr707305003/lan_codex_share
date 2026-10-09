@@ -175,7 +175,7 @@ test('late archive response cannot reopen a closed pane', async () => {
 - Task 1–3 已完成并本地提交：受限 ZIP 读取、隔离格式预览、授权 HTTP 接口；原包下载不依赖 ZIP 解析成功。
 - Task 4 已完成：面包屑、单层分页、独立成员下载、工作表选择、请求取消及对象 URL 清理。浏览器使用独立模拟会话，不连接用户 Codex。已实测宽屏与 375px 窄屏、Excel/空工作表切换；目录返回、分页、迟到响应由自动测试覆盖。未逐一进行全部格式的浏览器人工测试。
 - Task 5 已补充 README 和无服务启动的冒烟脚本，覆盖 ZIP 目录、成员下载、DOCX 和 XLSX 缓存值。PyInstaller Share spec 原有整目录 web 收集覆盖新增脚本，Python 模块使用静态导入；未构建冻结程序，Windows 冻结程序与其他平台仍待发布前验证。
-- 初轮完整回归：884 项 Python、65 项 JavaScript 全部通过；随后补充子进程错误恢复、外部工作表拒绝和分页测试，最终结果见交付说明。重复成员测试产生的 zipfile warning 为故意构造的测试输入。
+- 最终完整回归：886 项 Python、66 项 JavaScript 全部通过；已补充子进程错误恢复、外部工作表拒绝和分页测试。源代码隔离冒烟通过，`git diff --check` 通过。重复成员测试产生的 zipfile warning 为故意构造的测试输入。
 - 不自动重启真实服务，不推送、不打包、不发布；保留当前 main 中的本地成果。
 
 任务 1 覆盖容器约束与成员身份，任务 2 覆盖格式和运行资源，任务 3 覆盖授权边界，任务 4 覆盖导航与并发请求，任务 5 覆盖回归/文档/冻结兼容。各接口仅依赖前置任务明确的签名；示例测试中的 server、xlsx_archive、setupArchivePreview 由对应测试任务建立本地夹具。现有下载修复保留并纳入任务 3、4 回归。
