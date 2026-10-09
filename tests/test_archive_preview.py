@@ -35,6 +35,25 @@ def test_xlsx_formula_cache_and_sheet_selection(tmp_path):
     assert preview(tmp_path, '方案.xlsx', xlsx_bytes(), sheet=1)['rows'] == []
 
 
+@pytest.mark.parametrize('override,valid', [('', True),
+    ('<Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>', False)])
+def test_workbook_default_content_type_and_override_precedence(tmp_path, override, valid):
+    output = BytesIO()
+    with zipfile.ZipFile(BytesIO(xlsx_bytes())) as original, zipfile.ZipFile(output, 'w') as modified:
+        for entry in original.infolist():
+            data = original.read(entry)
+            if entry.filename == '[Content_Types].xml':
+                data = ('<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                        '<Default Extension="xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+                        + override + '</Types>').encode()
+            modified.writestr(entry, data)
+    if valid:
+        assert preview(tmp_path, 'default.xlsx', output.getvalue())['rows'][0][1] == '4'
+    else:
+        with pytest.raises(ArchiveError, match='不是有效的 XLSX'):
+            preview(tmp_path, 'macro.xlsx', output.getvalue())
+
+
 def test_sparse_sheet_is_bounded(tmp_path):
     sheet = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="999999"><c r="ZZZ999999"><v>2</v></c></row><row r="1"><c r="A1" t="b"><v>1</v></c></row></sheetData></worksheet>'
     result = preview(tmp_path, 'large.xlsx', xlsx_bytes(sheet))

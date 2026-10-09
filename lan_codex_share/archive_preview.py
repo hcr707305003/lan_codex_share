@@ -39,7 +39,16 @@ def _xlsx(path, sheet):
 
         content_types = xml('[Content_Types].xml')
         expected = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml'
-        if not any(node.get('PartName') == '/xl/workbook.xml' and node.get('ContentType') == expected for node in content_types):
+        # OPC allows an extension Default when a part has no explicit Override.
+        # An explicit non-XLSX type must never fall back to the default.
+        overrides = [node.get('ContentType') for node in content_types
+                     if node.tag.rsplit('}', 1)[-1] == 'Override'
+                     and node.get('PartName') == '/xl/workbook.xml']
+        defaults = [node.get('ContentType') for node in content_types
+                    if node.tag.rsplit('}', 1)[-1] == 'Default'
+                    and node.get('Extension', '').lower() == 'xml']
+        workbook_types = overrides if overrides else defaults
+        if len(workbook_types) != 1 or workbook_types[0] != expected:
             raise ArchiveError('不是有效的 XLSX 工作簿')
         sheets = xml('xl/workbook.xml').findall(_S + 'sheets/' + _S + 'sheet')
         if len(sheets) > 200:
