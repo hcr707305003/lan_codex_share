@@ -636,8 +636,14 @@ def test_workspace_file_preview_route_and_boundary(tmp_path):
         assert status == 403
         assert "工作区" in json.loads(body)["error"]
         assert request(server, "GET", f"/api/files/download?path={quote(str(outside))}")[0] == 403
-        assert request(server, "GET", f"/api/files/download?path={quote(str(unsupported))}")[0] == 415
-        assert request(server, "GET", f"/api/files/download?path={quote(str(oversized))}")[0] == 413
+        status, headers, body = request(server, "GET", f"/api/files/download?path={quote(str(unsupported))}")
+        assert status == 200 and body == b"zip-data"
+        assert dict(headers)["Content-Disposition"].startswith("attachment;")
+        status, _, body = request(server, "GET", f"/api/files/view?path={quote(str(unsupported))}")
+        assert status == 200 and json.loads(body)["kind"] == "archive"
+        status, _, body = request(server, "GET", f"/api/files/download?path={quote(str(oversized))}")
+        assert status == 200 and body == oversized.read_bytes()
+        assert request(server, "GET", f"/api/files/view?path={quote(str(oversized))}")[0] == 413
     finally:
         server.shutdown()
         server.server_close()

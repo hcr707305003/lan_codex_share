@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
 import json
 import logging
+import os
 from pathlib import Path
 import queue
 import secrets
@@ -20,6 +21,8 @@ from .lan_access import AccessDenied, is_lan_client, normalize_public_origin, no
 from .lan_store import ImageStore, ImageValidationError
 from .document_store import DocumentStore, MAX_TOTAL_BYTES
 from .workspace_files import WorkspaceFileError, WorkspaceFilePreview, WorkspaceFileViewer
+from .archive_reader import ArchiveError
+from .archive_worker import run_archive
 from .dynamic_proxy import ProxyError, check_browser_origin, forward, parse_target
 from .static_assets import StaticAssets
 from .stream_delta import SnapshotDelta
@@ -231,7 +234,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header(
                     "Content-Security-Policy",
-                    "default-src 'self'; img-src 'self' data: blob:; connect-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+                    "default-src 'self'; img-src 'self' data: blob:; object-src 'self' blob:; connect-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'",
                 )
                 self._security_headers()
                 self.end_headers()
@@ -252,7 +255,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_bytes(200, asset.body, asset.mime, {"ETag": asset.etag}, cache_control=cache)
                 return
-            if path in {"/app.js", "/history.js", "/realtime.js", "/notifications.js", "/tasks.js", "/profiles.js", "/notice.js"}:
+            if path in {"/app.js", "/history.js", "/realtime.js", "/notifications.js", "/tasks.js", "/profiles.js", "/notice.js", "/archive-preview.js"}:
                 self._serve_asset(path[1:], "text/javascript; charset=utf-8")
                 return
             if path == "/style.css":
@@ -356,6 +359,9 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                     'Content-Disposition': disposition + "; filename*=UTF-8''" + quote(record['name'], safe=''),
                 }, frame_options='SAMEORIGIN' if is_preview else 'DENY')
                 return
+            if path in {"/api/archives/list", "/api/archives/preview", "/api/archives/download"}:
+                self._serve_archive(path.rsplit('/', 1)[-1], parse_qs(request_url.query, keep_blank_values=True))
+                return
             if path == "/api/files/view":
                 raw_path = parse_qs(request_url.query, keep_blank_values=True).get("path", [""])[0]
                 self._serve_workspace_file(raw_path)
@@ -392,7 +398,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
         except WorkspaceFileError as exc:
             self._error(exc.status, str(exc))
             return
-        if preview.kind in {"markdown", "code"}:
+        if preview.kind in {"markdown", "code", "download", "archive"}:
             self._json(HTTPStatus.OK, preview.json_value())
             return
         filename = quote(preview.name, safe="")
@@ -405,22 +411,71 @@ class LanRequestHandler(BaseHTTPRequestHandler):
 
     def _serve_workspace_download(self, raw_path: str) -> None:
         try:
-            preview = self._open_workspace_file(raw_path)
+            preview = self._open_workspace_file(raw_path, download=True)
+            source = preview.path.open("rb")
         except WorkspaceFileError as exc:
             self._error(exc.status, str(exc))
             return
+        except OSError:
+            self._error(404, "无法读取文件")
+            return
         filename = quote(preview.name, safe="")
-        self._send_bytes(
-            HTTPStatus.OK,
-            preview.path.read_bytes(),
-            preview.mime,
-            {"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
-        )
+        # Stream attachments rather than loading an entire archive into memory.
+        with source:
+            remaining = os.fstat(source.fileno()).st_size
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", preview.mime)
+            self.send_header("Content-Length", str(remaining))
+            self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{filename}")
+            self.send_header("Connection", "close")
+            self._security_headers()
+            self.end_headers()
+            self.close_connection = True
+            while remaining:
+                chunk = source.read(min(remaining, 256 * 1024))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
-    def _open_workspace_file(self, raw_path: str) -> WorkspaceFilePreview:
+    def _open_workspace_file(self, raw_path: str, *, download: bool = False) -> WorkspaceFilePreview:
         if hasattr(self.app.service, "preview_roots"):
             self.app.file_viewer.set_dynamic_roots(self.app.service.preview_roots)
-        return self.app.file_viewer.open(raw_path)
+        return self.app.file_viewer.open(raw_path, download=download)
+
+    def _serve_archive(self, action, query):
+        try:
+            path = query.get('path', [''])[0]
+            file = self._open_workspace_file(path, download=True)
+            if file.path.suffix.lower() != '.zip':
+                raise ArchiveError('仅支持 ZIP 压缩包浏览')
+
+            def number(name, default, maximum):
+                raw = query.get(name, [str(default)])[0]
+                if not raw.isascii() or not raw.isdigit() or len(raw) > 5 or not 0 <= int(raw) < maximum:
+                    raise ArchiveError('压缩包分页或成员参数无效')
+                return int(raw)
+
+            version = query.get('version', [''])[0]
+            if version and (len(version) != 64 or any(c not in '0123456789abcdef' for c in version)):
+                raise ArchiveError('压缩包版本参数无效')
+            directory = query.get('directory', [''])[0]
+            if len(directory) > 4096:
+                raise ArchiveError('目录路径过长')
+            result = run_archive(str(file.path), action, version=version,
+                member=number('member', 0, 5000), directory=directory,
+                page=number('page', 0, 5000), sheet=number('sheet', 0, 200))
+            if 'data' not in result:
+                self._json(HTTPStatus.OK, result)
+                return
+            inline = action == 'preview' and result.get('kind') in {'image', 'pdf'}
+            self._send_bytes(HTTPStatus.OK, result['data'],
+                result['mime'] if inline else 'application/octet-stream',
+                {'Content-Disposition': ('inline' if inline else 'attachment') +
+                    "; filename*=UTF-8''" + quote(result['name'], safe='')},
+                frame_options='SAMEORIGIN' if inline else 'DENY')
+        except (ArchiveError, WorkspaceFileError) as exc:
+            self._error(exc.status, str(exc))
 
     def _serve_delta_events(self, session_id: str | None) -> None:
         subscriber = self.app.service.subscribe()

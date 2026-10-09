@@ -21,7 +21,7 @@ def test_reads_markdown_and_code_inside_workspace(tmp_path):
     assert code_preview.relative_path == "app.php"
 
 
-def test_rejects_outside_missing_directory_and_unknown_binary(tmp_path):
+def test_rejects_outside_missing_directory_and_describes_binary(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     directory = workspace / "folder"
@@ -32,10 +32,13 @@ def test_rejects_outside_missing_directory_and_unknown_binary(tmp_path):
     outside.write_text("secret", encoding="utf-8")
     viewer = WorkspaceFileViewer(workspace)
 
-    for path, status in ((outside, 403), (workspace / "missing.txt", 404), (directory, 400), (binary, 415)):
-        with pytest.raises(WorkspaceFileError) as caught:
-            viewer.open(str(path))
-        assert caught.value.status == status
+    for path, status in ((outside, 403), (workspace / "missing.txt", 404), (directory, 400)):
+        for download in (False, True):
+            with pytest.raises(WorkspaceFileError) as caught:
+                viewer.open(str(path), download=download)
+            assert caught.value.status == status
+    assert viewer.open(str(binary)).kind == "archive"
+    assert viewer.open(str(binary), download=True).content is None
 
 
 def test_enforces_size_limits_and_marks_invalid_utf8(tmp_path):
@@ -48,6 +51,7 @@ def test_enforces_size_limits_and_marks_invalid_utf8(tmp_path):
     with pytest.raises(WorkspaceFileError) as caught:
         viewer.open(str(large))
     assert caught.value.status == 413
+    assert viewer.open(str(large), download=True).size == 5
 
     preview = WorkspaceFileViewer(tmp_path).open(str(invalid))
     assert preview.encoding_warning
@@ -78,9 +82,10 @@ def test_link_target_requires_explicit_preview_root(tmp_path):
     except OSError:
         pytest.skip("当前 Windows 环境不允许创建目录链接")
 
-    with pytest.raises(WorkspaceFileError) as caught:
-        WorkspaceFileViewer(workspace).open(str(mounted / "design.md"))
-    assert caught.value.status == 403
+    for download in (False, True):
+        with pytest.raises(WorkspaceFileError) as caught:
+            WorkspaceFileViewer(workspace).open(str(mounted / "design.md"), download=download)
+        assert caught.value.status == 403
 
     preview = WorkspaceFileViewer(workspace, preview_roots=[target]).open(str(document))
 

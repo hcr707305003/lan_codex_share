@@ -84,7 +84,7 @@ class WorkspaceFileViewer:
                     roots.append(candidate)
             self.roots = tuple(roots)
 
-    def open(self, raw_path: str) -> WorkspaceFilePreview:
+    def open(self, raw_path: str, *, download: bool = False) -> WorkspaceFilePreview:
         if not raw_path.strip():
             raise WorkspaceFileError(400, "文件路径不能为空")
         logical_path = Path(os.path.abspath(Path(raw_path).expanduser()))
@@ -118,6 +118,13 @@ class WorkspaceFileViewer:
         if matched_root != self.root:
             relative_path = f"{matched_root.name}/{relative_path}"
 
+        if download:
+            mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+            if suffix in MARKDOWN_EXTENSIONS:
+                mime = "text/markdown; charset=utf-8"
+            return WorkspaceFilePreview(path, relative_path, name, "download", mime, size)
+        if suffix == '.zip':
+            return WorkspaceFilePreview(path, relative_path, name, "archive", "application/zip", size)
         if suffix in MARKDOWN_EXTENSIONS:
             return self._read_text(path, relative_path, "markdown", "text/markdown; charset=utf-8", size)
         if suffix in TEXT_EXTENSIONS or name.lower() in TEXT_FILENAMES:
@@ -129,7 +136,7 @@ class WorkspaceFileViewer:
         if suffix == ".pdf":
             self._check_inline_size(size)
             return WorkspaceFilePreview(path, relative_path, name, "pdf", "application/pdf", size)
-        raise WorkspaceFileError(415, "此文件类型不支持浏览器预览")
+        return WorkspaceFilePreview(path, relative_path, name, "download", "application/octet-stream", size)
 
     def _read_text(self, path: Path, relative_path: str, kind: str, mime: str, size: int) -> WorkspaceFilePreview:
         if size > self.max_text_bytes:
