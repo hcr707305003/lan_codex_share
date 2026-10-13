@@ -28,8 +28,7 @@
     function shell(member = null) {
       const panel = node('section', '', 'archive-panel');
       const toolbar = node('div', '', 'archive-toolbar');
-      toolbar.append(link('下载整个 ZIP', '/api/files/download?' + new URLSearchParams({path: state.path})));
-      if (member) toolbar.append(link('下载此文件', endpoint('download', {member: member.id}), member.name));
+      if (member) toolbar.append(button('返回文件列表', () => list(state.directory, state.page)));
       const crumbs = node('nav', '', 'archive-breadcrumbs'); crumbs.setAttribute('aria-label', '压缩包目录');
       crumbs.append(button('ZIP 根目录', () => list('', 0)));
       let prefix = '';
@@ -37,9 +36,15 @@
         prefix += part + '/'; const target = prefix;
         crumbs.append(node('span', '/'), button(part, () => list(target, 0)));
       }
-      if (member) crumbs.append(node('span', '/'), node('strong', member.name));
+      if (member) {
+        const name = node('strong', member.name); name.title = member.name;
+        crumbs.append(node('span', '/'), name);
+      }
+      toolbar.append(crumbs);
+      if (member) toolbar.append(link('下载此文件', endpoint('download', {member: member.id}), member.name));
+      toolbar.append(link('下载整个 ZIP', '/api/files/download?' + new URLSearchParams({path: state.path})));
       const body = node('div', '', 'archive-content'); body.setAttribute('aria-live', 'polite');
-      panel.append(toolbar, crumbs, body); container.replaceChildren(panel);
+      panel.append(toolbar, body); container.replaceChildren(panel);
       return body;
     }
     async function load(url, body, render) {
@@ -99,16 +104,16 @@
       if (!state) return;
       const body = shell(entry);
       await load(endpoint('preview', {member: entry.id, sheet}), body, (data, type) => {
-        body.append(button('返回文件列表', () => list(state.directory, state.page)));
         if (!type.includes('application/json')) {
           if (!type.startsWith('image/') && !type.includes('application/pdf')) throw new Error('不支持的预览类型，请下载文件');
           const url = urls.createObjectURL(data); objectUrls.push(url);
           if (type.startsWith('image/')) {
             const image = node('img', '', 'file-preview-image'); image.src = url; image.alt = entry.name; body.append(image);
           } else {
-            body.append(node('p', '若浏览器无法显示 PDF，请下载此文件查看。', 'archive-message'));
+            body.className = 'archive-content archive-content-pdf';
             const object = node('object', '', 'file-preview-pdf'); object.data = url; object.type = 'application/pdf';
-            object.append(node('p', '当前浏览器无法内嵌显示 PDF。')); body.append(object);
+            object.title = entry.name;
+            object.append(node('p', '当前浏览器无法内嵌显示 PDF，请使用上方“下载此文件”。')); body.append(object);
           }
         } else {
           if (data.warning) body.append(node('p', data.warning, 'archive-message'));

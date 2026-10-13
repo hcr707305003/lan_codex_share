@@ -234,7 +234,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header(
                     "Content-Security-Policy",
-                    "default-src 'self'; img-src 'self' data: blob:; object-src 'self' blob:; connect-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+                    "default-src 'self'; img-src 'self' data: blob:; object-src 'self' blob:; frame-src 'self' blob:; connect-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'",
                 )
                 self._security_headers()
                 self.end_headers()

@@ -84,3 +84,28 @@ test('download remains available on preview failure and object URLs are revoked'
   await find(s.container,n=>n.tagName==='button'&&n.text==='说明.md')[0].events.click();
   s.viewer.close(); assert.deepEqual(s.revoked,['blob:test']);
 });
+
+test('PDF uses a compact toolbar and dedicated full-height content, reset on return', async()=>{
+  const pdfListing={...listing,entries:[{...listing.entries[0],name:'通知书.pdf'}]};
+  const s=setup(url=>url.includes('/list?')?json(pdfListing):
+    {ok:true,headers:{get:()=> 'application/pdf'},blob:async()=>({})});
+  await s.viewer.open({path:'C:/sample.zip'});
+  await find(s.container,n=>n.tagName==='button'&&n.text==='通知书.pdf')[0].events.click();
+  const toolbar=find(s.container,n=>n.className==='archive-toolbar')[0];
+  const back=find(toolbar,n=>n.tagName==='button'&&n.text==='返回文件列表')[0];
+  assert.ok(back, 'return control belongs in toolbar, not above PDF');
+  assert.equal(find(toolbar,n=>n.tagName==='nav').length,1);
+  assert.equal(find(toolbar,n=>n.tagName==='a').length,2);
+  const content=find(s.container,n=>n.className==='archive-content archive-content-pdf')[0];
+  assert.ok(content);
+  assert.equal(content.children.length,1,'no constant warning taking up document space');
+  const object=content.children[0];
+  assert.equal(object.tagName,'object');
+  assert.equal(object.type,'application/pdf');
+  assert.equal(object.data,'blob:test');
+  assert.equal(object.title,'通知书.pdf');
+  assert.match(object.textContent,/无法内嵌显示 PDF/);
+  await back.events.click();
+  assert.equal(find(s.container,n=>n.className==='archive-content archive-content-pdf').length,0);
+  assert.deepEqual(s.revoked,['blob:test']);
+});

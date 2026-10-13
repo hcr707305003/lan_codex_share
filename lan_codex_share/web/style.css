@@ -627,17 +627,21 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .file-preview-actions { display: flex; align-items: center; gap: 2px; }
 .file-preview-actions [hidden], .project-profile [hidden] { display: none !important; }
 .file-preview-body { min-width: 0; min-height: 0; overflow: auto; outline: 0; }
-.archive-panel { min-width: 0; padding: 16px; overflow-wrap: anywhere; }
+.archive-panel { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; overflow-wrap: anywhere; }
 .archive-toolbar, .archive-breadcrumbs, .archive-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.archive-toolbar { padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.archive-breadcrumbs { margin: 12px 0; color: var(--text-soft); font-size: 12px; }
+.archive-toolbar { flex: 0 0 auto; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.archive-breadcrumbs { flex: 1 1 180px; min-width: 0; flex-wrap: nowrap; overflow-x: auto; color: var(--text-soft); font-size: 12px; }
+.archive-breadcrumbs button, .archive-toolbar > button, .archive-toolbar > a { flex-shrink: 0; white-space: nowrap; }
+.archive-breadcrumbs strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .archive-panel button, .archive-download, .archive-panel select { min-height: 36px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: var(--surface); color: var(--text); font: inherit; }
 .archive-panel button { cursor: pointer; text-align: left; }
 .archive-panel button:hover:not(:disabled), .archive-download:hover { background: var(--surface-hover); }
 .archive-panel button:disabled { opacity: .45; cursor: default; }
 .archive-panel :is(button, a, select, [tabindex]):focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
 .archive-download { display: inline-flex; align-items: center; text-decoration: none; font-size: 12px; }
-.archive-content { min-width: 0; }
+.archive-content { flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; padding: 16px; }
+.archive-content-pdf { padding: 0; overflow: hidden; }
+.archive-content-pdf .file-preview-pdf { height: 100%; min-height: 0; background: var(--surface); }
 .archive-entries { list-style: none; margin: 0; padding: 0; }
 .archive-entry { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .archive-entry-type, .archive-entry-size { color: var(--text-soft); font-size: 11px; }

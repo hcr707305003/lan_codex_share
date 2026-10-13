@@ -276,6 +276,12 @@ def test_page_snapshot_and_message_post(tmp_path):
         assert b'id="clear"' not in page
         assert dict(headers)["X-Content-Type-Options"] == "nosniff"
         assert "img-src 'self' data: blob:" in dict(headers)["Content-Security-Policy"]
+        csp = dict(headers)["Content-Security-Policy"]
+        directives = dict(part.strip().split(" ", 1) for part in csp.split(";") if part.strip())
+        assert directives["frame-src"] == "'self' blob:"
+        assert directives["object-src"] == "'self' blob:"
+        assert directives["default-src"] == "'self'"
+        assert directives["frame-ancestors"] == "'none'"
 
         status, _, stylesheet = request(server, "GET", "/style.css")
         assert status == 200
