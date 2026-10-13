@@ -4,7 +4,7 @@
 
 同一个 Web 端口还可动态反代本机和局域网 HTTP 服务，无需为每个服务添加子域名或配置条目。
 
-[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.2.1 更新说明](docs/releases/v0.2.1.md)
+[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.5.1 更新说明](docs/releases/v0.5.1.md)
 
 **公网部署请设置项目密码，并且只代理可信服务。无密码不是只读：访问者可以发送 Codex 任务、读取授权文件并操作可达的内网服务。**
 
@@ -22,7 +22,19 @@
 
 ## 界面预览
 
+以下截图更新于 2026-10-13，使用 v0.5.1 源码与演示数据：网页会话为模拟数据，控制台未启动真实服务或隧道，不包含真实凭证或业务文件。
+
+### 网页工作台
+
+![LAN Codex Share 网页界面：项目分组、共享会话与 Markdown 回复](docs/screenshots/lan-codex-share-overview.png)
+
+网页端提供项目与 Session 导航、实时执行过程、流式回复、模型切换和消息输入，多个局域网访问者可以同步查看同一任务进度。
+
 ### ZIP 压缩包预览
+
+![ZIP 内 PDF 预览：紧凑工具栏与可调宽面板](docs/screenshots/lan-codex-share-pdf-preview.png)
+
+返回目录、面包屑和下载入口集中在顶部，PDF 撑满面板剩余高度。PDF 使用浏览器原生阅读器，其内部工具栏、缩略图和缩放样式可能随浏览器而不同。
 
 桌面端可拖动右侧预览面板的左边界调整宽度，当前浏览器会记住设置；双击分隔线恢复默认。分隔线获得键盘焦点后，可用左右方向键调整、Home 重置。手机窄屏继续使用全屏预览，拖动不会重新加载文件。
 
@@ -48,10 +60,6 @@
 - 预览与下载沿用项目密码并核对 Session，Markdown/文字预览不会执行文档 HTML 或脚本，也不会运行宏或自动加载远程图片。PDF 预览仅允许同源内嵌。项目成员共享访问权限，不提供逐用户私密附件；不要上传不适合当前共享成员查看的材料。原文件和提取缓存保存在本机，缓存不会随聊天历史全量下发；提取文字会通过现有 Codex 配置交给模型服务。
 
 源码升级需要在实际运行 Share 的 Python 环境执行 `python -m pip install -r requirements.txt`，然后由你手动重启服务并刷新页面。v0.3.0 及之后的发布包已包含文档处理依赖，无需安装 Word 或额外 Python 包。
-
-![LAN Codex Share 网页界面](docs/screenshots/lan-codex-share-overview.png)
-
-网页端提供项目与 Session 导航、实时执行过程、流式回复、模型切换和消息输入，多个局域网访问者可以同步查看同一任务进度。
 
 仓库维护者发布新版本时，请按 [流水线构建与版本发布](PIPELINE_RELEASE.md) 操作；每个 Release 必须详细说明与功能相关的新增、修复、行为变化和升级提示。
 
