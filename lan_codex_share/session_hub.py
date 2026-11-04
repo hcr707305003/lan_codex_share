@@ -41,6 +41,7 @@ class LanSessionHub:
         self._default_session_id: str | None = None
         self._subscribers: set[queue.Queue[int]] = set()
         self._lock = threading.RLock()
+        self._metadata_lock = threading.RLock()
         self._service_create_lock = threading.RLock()
         self._fixed_ids = None
         self._version = 0
@@ -370,6 +371,10 @@ class LanSessionHub:
         return dict(record, project_id=project_id, cwd=project['cwd'], original_name=project['original_name'])
 
     def refresh_catalog(self) -> None:
+        with self._metadata_lock:
+            self._refresh_catalog()
+
+    def _refresh_catalog(self) -> None:
         if not self._catalog_mode:
             if self.tasks and hasattr(self.tasks.client, 'list_threads'):
                 self._refresh_names(self.tasks.client.list_threads())
@@ -475,6 +480,15 @@ class LanSessionHub:
             if documents:
                 return service.submit(text, images, source_ip, documents=documents)
             return service.submit(text, images, source_ip)
+
+    def rename_session(self, session_id, name):
+        from .session_name import validate_session_name
+        name = validate_session_name(name)
+        with self._metadata_lock:
+            selected, service = self._service(session_id)
+            name = service.rename_session(name)
+            self._refresh_names([{'id': selected, 'name': name}])
+        return name
 
     def cancel_queued(self, session_id: Any, message_id: str, source_ip: str) -> bool:
         return self._service(session_id)[1].cancel_queued(message_id, source_ip)

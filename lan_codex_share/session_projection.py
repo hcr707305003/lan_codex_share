@@ -49,6 +49,11 @@ class SessionProjection:
             self._connection = state
         self._changed()
 
+    def set_name(self, name: str) -> None:
+        with self._lock:
+            self._thread['name'] = name
+        self._changed()
+
     def replace_thread(self, thread: dict[str, Any]) -> None:
         self._document_session_id = thread.get('id')
         normalized = self._normalize_thread(thread)

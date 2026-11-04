@@ -630,6 +630,17 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, result)
                 return
             session_id = self.app.service.resolve_session_id(payload.get("session_id"))
+            if path == '/api/session/rename':
+                from .session_name import validate_session_name
+                from .codex_client import CodexClientError
+                name = validate_session_name(payload.get('name'))
+                try:
+                    name = self.app.service.rename_session(session_id, name)
+                except CodexClientError as exc:
+                    self._error(HTTPStatus.BAD_GATEWAY, str(exc))
+                    return
+                self._json(HTTPStatus.OK, {'name': name})
+                return
             if path == "/api/messages":
                 raw_images = payload.get("images", [])
                 if not isinstance(raw_images, list):

@@ -386,6 +386,18 @@ class CodexClient:
                     })
                 return models
 
+    def rename_thread(self, thread_id: str, name: str) -> str:
+        from .session_name import validate_session_name
+        name = validate_session_name(name)
+        self.start()
+        try:
+            self.rpc.request('thread/name/set', {'threadId': thread_id, 'name': name}, timeout=15)
+        except JsonRpcError as exc:
+            if exc.code == -32601:
+                raise CodexClientError('当前 Codex 不支持会话重命名，请升级 Codex') from exc
+            raise CodexClientError('Codex 拒绝重命名，请稍后重试') from exc
+        return name
+
     def read_thread_metadata(self, thread_id: str) -> dict[str, Any]:
         self.start()
         result = self.rpc.request("thread/read", {"threadId": thread_id, "includeTurns": False}, timeout=30)

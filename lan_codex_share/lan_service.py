@@ -111,6 +111,13 @@ class LanChatService:
             **({"history": projected["history"]} if "history" in projected else {}),
         }
 
+    def rename_session(self, name: str) -> str:
+        if self._released or not self.thread_id:
+            raise ValueError('会话未连接或已释放，请重新选择会话')
+        name = self.codex.rename_thread(self.thread_id, name)
+        self.projection.set_name(name)
+        return name
+
     def activities(self, turn_id: str, epoch: str, before: str | None = None) -> dict[str, Any]:
         return self.projection.activities(turn_id, epoch, before)
 

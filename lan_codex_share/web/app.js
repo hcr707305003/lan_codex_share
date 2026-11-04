@@ -1828,6 +1828,45 @@ document.getElementById('copy-session').addEventListener('click', async () => {
   catch (_) { setNotice(`Session ID：${id}`); }
 });
 
+// Capture the session at dialog open: switching tabs must never change the target.
+const renameDialog = document.getElementById('rename-dialog');
+const renameInput = document.getElementById('rename-name');
+const renameError = document.getElementById('rename-error');
+const renameSave = document.getElementById('rename-save');
+const renameCancel = document.getElementById('rename-cancel');
+let renameTarget = null, renameSaving = false;
+document.getElementById('rename-session').addEventListener('click', () => {
+  closeMenu();
+  if (!selectedSessionId || renameSaving) return;
+  renameTarget = selectedSessionId;
+  renameInput.value = latestSnapshot?.thread?.name || threadTitle.textContent;
+  renameError.textContent = '';
+  renameDialog.showModal(); renameInput.focus(); renameInput.select();
+});
+renameCancel.addEventListener('click', () => { if (!renameSaving) renameDialog.close(); });
+renameDialog.addEventListener('cancel', event => { if (renameSaving) event.preventDefault(); });
+document.getElementById('rename-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (renameSaving || !renameTarget) return;
+  const name = renameInput.value.trim();
+  if (!name || [...name].length > 100 || /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u.test(renameInput.value)) {
+    renameError.textContent = '请输入 1～100 个字符，不能包含换行或控制字符。';
+    renameInput.focus(); return;
+  }
+  renameSaving = true;
+  renameSave.disabled = renameCancel.disabled = renameInput.disabled = true;
+  renameError.textContent = '';
+  try {
+    await mutateForSession('/api/session/rename', renameTarget, {name});
+    renameDialog.close(); setNotice('会话名称已写回 Codex。');
+    refresh().catch(error => setNotice(`名称已保存，但刷新失败：${error.message}`, true));
+  } catch (error) { renameError.textContent = error.message || '重命名失败，请重试。'; }
+  finally {
+    renameSaving = false;
+    renameSave.disabled = renameCancel.disabled = renameInput.disabled = false;
+  }
+});
+
 resyncButton.addEventListener('click', async () => {
   closeMenu(); setNotice('正在从真实 Session 重新同步…');
   try {
