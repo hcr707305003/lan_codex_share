@@ -527,6 +527,11 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .task-notification-close:hover { background: var(--surface-hover); color: var(--text); }
 .processing-banner { position: relative; display: grid; min-width: 0; max-width: 100%; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; margin-bottom: 9px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--warning) 52%, var(--border)); border-radius: 11px; background: color-mix(in srgb, var(--warning) 10%, #252525); padding: 9px 12px 12px; color: #f2d494; box-shadow: 0 8px 24px rgba(0,0,0,.16); }
 .processing-banner[hidden] { display: none; }
+.processing-banner { grid-template-columns: auto minmax(0, 1fr) auto; }
+#stop-current-task { padding: 7px 10px; border: 1px solid var(--danger); border-radius: 7px; background: var(--surface); color: var(--danger); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+#stop-current-task:hover:not(:disabled) { background: var(--surface-hover); }
+#stop-current-task:disabled { opacity: .5; cursor: wait; }
+#stop-current-task:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
 .processing-spinner { width: 19px; height: 19px; border: 2px solid color-mix(in srgb, var(--warning) 28%, transparent); border-top-color: var(--warning); border-radius: 50%; animation: spin .8s linear infinite; }
 .processing-copy { min-width: 0; }
 .processing-copy strong, .processing-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

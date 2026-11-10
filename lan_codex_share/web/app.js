@@ -1904,13 +1904,22 @@ clearQueueButton.addEventListener('click', async () => {
   }
 });
 
-cancelButton.addEventListener('click', async () => {
+const stopCurrentTask = document.getElementById('stop-current-task');
+let stopRequestPending = false;
+async function stopCurrentTaskRequest() {
+  if (stopRequestPending || !selectedSessionId) return;
+  const target = selectedSessionId;
+  stopRequestPending = true;
+  stopCurrentTask.disabled = true;
   closeMenu();
   try {
-    const result = await mutate('/api/cancel');
-    setNotice(result.cancelled ? '已请求取消当前任务。' : '当前没有活动任务。');
-  } catch (error) { setNotice(error.message, true); }
-});
+    const result = await mutateForSession('/api/cancel', target);
+    if (selectedSessionId === target) setNotice(result.cancelled ? '已请求停止当前任务，正在等待结束。排队消息仍保留。' : '当前没有活动任务。');
+  } catch (error) { if (selectedSessionId === target) setNotice(error.message, true); }
+  finally { stopRequestPending = false; stopCurrentTask.disabled = false; }
+}
+cancelButton.addEventListener('click', stopCurrentTaskRequest);
+stopCurrentTask.addEventListener('click', stopCurrentTaskRequest);
 
 document.getElementById('sidebar-toggle').addEventListener('click', () => { sidebar.classList.add('open'); mobileScrim.hidden = false; });
 document.getElementById('sidebar-close').addEventListener('click', closeSidebar);
