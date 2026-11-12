@@ -417,7 +417,7 @@ def test_model_settings_are_shared_and_only_change_when_idle(tmp_path):
         assert snapshot["model_settings"] == {
             "model": "gpt-5.6-sol", "reasoning_effort": "high", "service_tier": None,
         }
-        assert snapshot["model_catalog"][1]["display_name"] == "GPT-5.6 Luna"
+        assert next(item for item in snapshot["model_catalog"] if item['model'] == 'gpt-5.6-luna')["display_name"] == "GPT-5.6 Luna"
 
         result = service.update_model_settings("gpt-5.6-luna", "medium", "priority", "192.168.1.3")
         assert result == {

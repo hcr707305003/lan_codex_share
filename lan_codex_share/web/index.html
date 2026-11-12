@@ -110,6 +110,13 @@
             </button>
             <div class="model-panel" id="model-panel" hidden>
               <div class="model-panel-title"><strong>模型设置</strong><span>应用到这个 Session 的后续任务</span></div>
+              <details class="custom-model"><summary>自定义新增模型</summary>
+                <label for="custom-model-id">模型 ID</label><input id="custom-model-id" maxlength="128" placeholder="例如 gpt-6.1-sol" autocomplete="off">
+                <label for="custom-model-name">显示名称</label><input id="custom-model-name" maxlength="100" placeholder="例如 GPT-6.1 Sol" autocomplete="off">
+                <p>本地条目不保证账号可调用；新增不会自动切换模型。</p>
+                <button class="model-load" id="custom-model-add" type="button">添加并保存</button>
+                <p id="custom-model-message" role="status"></p>
+              </details>
               <label for="model-select">模型</label>
               <select id="model-select"></select>
               <label for="effort-select">思考强度</label>

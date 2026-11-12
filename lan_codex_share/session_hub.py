@@ -481,6 +481,9 @@ class LanSessionHub:
                 return service.submit(text, images, source_ip, documents=documents)
             return service.submit(text, images, source_ip)
 
+    def add_model(self, session_id, model, name):
+        return self._service(session_id)[1].add_model(model, name)
+
     def rename_session(self, session_id, name):
         from .session_name import validate_session_name
         name = validate_session_name(name)

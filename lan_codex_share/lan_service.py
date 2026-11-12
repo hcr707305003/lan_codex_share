@@ -20,6 +20,8 @@ class LanChatService:
         self.projection = projection
         self.logger = logger
         self.document_store = document_store
+        from .model_catalog import ModelCatalog
+        self.local_models = ModelCatalog(projection.upload_directory.parent / "custom_models.json" if projection.upload_directory else None)
         self.thread_id: str | None = None
         self._queue: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self._queued_lock = threading.RLock()
@@ -94,7 +96,7 @@ class LanChatService:
         connection = str(projected.get("connection") or "disconnected")
         status = self._status(connection)
         with self._model_lock:
-            model_catalog = deepcopy(self._model_catalog)
+            model_catalog = self.local_models.merge(deepcopy(self._model_catalog))
             model_settings = dict(self._model_settings)
         return {
             "thread_id": self.thread_id,
@@ -110,6 +112,12 @@ class LanChatService:
             "last_notice": self._last_notice,
             **({"history": projected["history"]} if "history" in projected else {}),
         }
+
+    def add_model(self, model, name):
+        self.local_models.add(model, name)
+        self._broadcast()
+        with self._model_lock:
+            return self.local_models.merge(self._model_catalog)
 
     def rename_session(self, name: str) -> str:
         if self._released or not self.thread_id:
@@ -247,7 +255,7 @@ class LanChatService:
             if self._active.is_set() or bool(getattr(self.codex, "thread_busy", False)) or self._queued_tasks:
                 raise ValueError("任务与队列完成后才可调整模型")
             with self._model_lock:
-                entry = next((item for item in self._model_catalog if item.get("model") == selected_model), None)
+                entry = next((item for item in self.local_models.merge(self._model_catalog) if item.get("model") == selected_model), None)
             if entry is None:
                 raise ValueError("所选模型不在当前可用模型列表中")
             supported = {str(item.get("value")) for item in entry.get("supported_reasoning_efforts", [])}

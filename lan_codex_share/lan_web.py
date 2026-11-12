@@ -630,6 +630,10 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, result)
                 return
             session_id = self.app.service.resolve_session_id(payload.get("session_id"))
+            if path == '/api/models/add':
+                catalog = self.app.service.add_model(session_id, payload.get('model'), payload.get('name'))
+                self._json(HTTPStatus.OK, {'model_catalog': catalog})
+                return
             if path == '/api/session/rename':
                 from .session_name import validate_session_name
                 from .codex_client import CodexClientError

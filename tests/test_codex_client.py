@@ -248,7 +248,7 @@ def test_model_catalog_and_thread_settings_update(tmp_path):
         client.close()
 
 
-def test_astra_fallback_is_selectable_through_shared_session(tmp_path):
+def test_catalog_contains_only_server_models(tmp_path):
     from lan_codex_share.lan_service import LanChatService
     from lan_codex_share.session_projection import SessionProjection
 
@@ -256,26 +256,7 @@ def test_astra_fallback_is_selectable_through_shared_session(tmp_path):
     service = LanChatService(client, SessionProjection(tmp_path / "uploads"))
     try:
         service.start()
-        astra = next(item for item in service.snapshot()["model_catalog"] if item["model"] == "gpt-6-astra")
-        assert astra["display_name"] == "GPT-6 Astra"
-        assert astra["is_default"] is False
-        assert astra["default_reasoning_effort"] == "low"
-        assert [item["value"] for item in astra["supported_reasoning_efforts"]] == [
-            "low", "medium", "high", "xhigh", "max", "ultra",
-        ]
-        for tier in (None, "priority"):
-            settings = service.update_model_settings("gpt-6-astra", "high", tier, "127.0.0.1")
-            assert settings == {
-                "model": "gpt-6-astra", "reasoning_effort": "high", "service_tier": tier,
-            }
-            # Re-read the fake server's state, not only the client's local cache.
-            resumed = client.rpc.request("thread/resume", {"threadId": service.thread_id})
-            assert resumed["model"] == "gpt-6-astra"
-            assert resumed["reasoningEffort"] == "high"
-            assert resumed["serviceTier"] == tier
-            assert service.snapshot()["model_settings"] == settings
-        with pytest.raises(ValueError, match="不支持该速度档位"):
-            service.update_model_settings("gpt-6-astra", "high", "ultrafast", "127.0.0.1")
+        assert all(item["model"] != "gpt-6-astra" for item in client.list_models())
     finally:
         service.close()
 

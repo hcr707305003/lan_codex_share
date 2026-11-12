@@ -1253,7 +1253,7 @@ function renderModelControls(snapshot, processing, queueSize) {
   const settings = snapshot.model_settings || {};
   const current = catalog.find(item => item.model === settings.model);
   modelCurrent.textContent = current?.display_name || settings.model || '不可用';
-  modelToggle.disabled = !catalog.length || snapshot.connection !== 'connected';
+  modelToggle.disabled = snapshot.connection !== 'connected';
   const blocked = processing || queueSize > 0;
   modelSelect.disabled = blocked;
   effortSelect.disabled = blocked;
@@ -1758,6 +1758,28 @@ modelToggle.addEventListener('click', event => {
   event.stopPropagation(); closeMenu(); modelPanel.hidden = !modelPanel.hidden;
   modelToggle.setAttribute('aria-expanded', String(!modelPanel.hidden));
   if (!modelPanel.hidden) populateModelPanel();
+});
+const customModelAdd = document.getElementById('custom-model-add');
+customModelAdd.addEventListener('click', async () => {
+  if (customModelAdd.disabled || !selectedSessionId) return;
+  const target = selectedSessionId;
+  customModelAdd.disabled = true;
+  const message = document.getElementById('custom-model-message');
+  message.textContent = '正在保存…';
+  try {
+    const result = await mutateForSession('/api/models/add', target, {
+      model: document.getElementById('custom-model-id').value.trim(),
+      name: document.getElementById('custom-model-name').value.trim(),
+    });
+    if (selectedSessionId === target) {
+      latestSnapshot.model_catalog = result.model_catalog;
+      populateModelPanel();
+    }
+    message.textContent = '已添加并保存，请在模型列表选择后应用。';
+    document.getElementById('custom-model-id').value = '';
+    document.getElementById('custom-model-name').value = '';
+  } catch (error) { message.textContent = error.message; }
+  finally { customModelAdd.disabled = false; }
 });
 modelSelect.addEventListener('change', () => {
   const entry = selectedModelEntry();
