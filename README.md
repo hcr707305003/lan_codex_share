@@ -4,7 +4,7 @@
 
 同一个 Web 端口还可动态反代本机和局域网 HTTP 服务，无需为每个服务添加子域名或配置条目。
 
-[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.5.4 更新说明](docs/releases/v0.5.4.md)
+[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.5.5 更新说明](docs/releases/v0.5.5.md)
 
 **公网部署请设置项目密码，并且只代理可信服务。无密码不是只读：访问者可以发送 Codex 任务、读取授权文件并操作可达的内网服务。**
 

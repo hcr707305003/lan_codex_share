@@ -428,7 +428,17 @@ function appendInline(parent, text, allowLineBreaks = false) {
     if (match.index > cursor) parent.append(document.createTextNode(source.slice(cursor, match.index)));
     const token = match[0];
     if (token.startsWith('`')) {
-      parent.append(el('code', '', token.slice(1, -1)));
+      const value = token.slice(1, -1);
+      const local = parseLocalFileTarget(value);
+      // Standalone inline file references are common in Codex answers. Keep
+      // commands and fenced code inert; server preview roots still gate access.
+      if (local && !/[\r\n<>"|?*]/.test(local.path) && /\.[a-z0-9]{1,12}$/i.test(local.path)) {
+        const code = el('code');
+        appendLink(code, value, value, value);
+        parent.append(code);
+      } else {
+        parent.append(el('code', '', value));
+      }
     } else if (token.startsWith('**')) {
       const strong = el('strong');
       appendInline(strong, match[4], allowLineBreaks);

@@ -77,6 +77,21 @@ test('ordinary pipes, malformed headers and code fences remain unchanged', () =>
   assert.equal(all(render('```md\n| A |\n| --- |\n```'), 'code')[0].textContent, '| A |\n| --- |');
 });
 
+test('inline Windows file references become preview links without changing code blocks or commands', () => {
+  const target = 'C:\\Users\\Administrator\\项目目录\\report.md:1';
+  const root = render('复测步骤：`' + target + '`。');
+  const links = all(root, 'a');
+  assert.equal(links.length, 1);
+  assert.equal(links[0].textContent, target);
+  assert.equal(links[0].className, 'local-file-link');
+  assert.equal(links[0].title, '在右侧查看 C:\\Users\\Administrator\\项目目录\\report.md');
+  assert.equal(all(render('`F:/project/My Report.zip`'), 'a').length, 1);
+  assert.equal(all(render('```\n' + target + '\n```'), 'a').length, 0);
+  assert.equal(all(render('`python C:/project/run.py`'), 'a').length, 0);
+  assert.equal(all(render('`C:/project/run.exe --help`'), 'a').length, 0);
+  assert.equal(all(render('`javascript:alert(1)`'), 'a').length, 0);
+});
+
 test('streamed prefixes are safe; completed delimiter and rows become a table', () => {
   const text = '| A | B |\n| --- | --- |\n| 内容 | 继续 |';
   for (let end = 0; end <= text.length; end += 1) assert.doesNotThrow(() => render(text.slice(0, end)));
