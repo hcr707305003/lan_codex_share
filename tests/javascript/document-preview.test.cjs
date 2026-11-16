@@ -142,3 +142,18 @@ test('PDF embeds session-bound URL and offers fallback; failed response has no c
   assert.equal(c.filePreviewBody.textContent, '文件不存在');
   assert.equal(c.filePreviewDownload.attrs['aria-disabled'], 'true');
 });
+
+test('standalone XLSX renders safe cells and sheet switching preserves original download', async () => {
+  const c = setup();
+  let endpoint;
+  c.fetch = async url => { endpoint = url; return jsonResponse({kind: 'spreadsheet', sheets: ['名册', '空表'], sheet: 0, rows: [['<script>bad()</script>', '001']], truncated: false}); };
+  await c.openFilePreview({path: 'F:/名册.xlsx'});
+  assert.equal(all(c.filePreviewBody, 'td')[0].textContent, '<script>bad()</script>');
+  assert.equal(all(c.filePreviewBody, 'script').length, 0);
+  const download = c.filePreviewDownload.href;
+  const select = all(c.filePreviewBody, 'select')[0];
+  select.value = '1';
+  await select.events.change();
+  assert.match(endpoint, /&sheet=1$/);
+  assert.equal(c.filePreviewDownload.href, download);
+});

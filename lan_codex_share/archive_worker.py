@@ -25,6 +25,9 @@ def _child(path, action, options, output, sender):
         elif action == 'preview':
             result = preview_member(path, options['version'], options['member'], options['sheet'],
                                     workdir=str(Path(output).parent))
+        elif action == 'spreadsheet':
+            from .archive_preview import _xlsx
+            result = dict(kind='spreadsheet', **_xlsx(path, options['sheet']))
         else:
             raise ArchiveError('压缩包操作无效')
         if 'data' in result:

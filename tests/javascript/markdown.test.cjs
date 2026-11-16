@@ -99,6 +99,24 @@ test('streamed prefixes are safe; completed delimiter and rows become a table', 
   assert.equal(all(render(text), 'td').length, 2);
 });
 
+test('Codex file citations render preview and download links, including wrapped attributes', () => {
+  for (const prefix of [':', '::', ':::']) {
+    const file = 'F:/project/outputs/集团职工名册.xlsx';
+    const root = render(`${prefix}codex-file-citation{path="${file}"\nartifact_kind="workbook" purpose="output"}`);
+    const links = all(root, 'a');
+    assert.equal(links.length, 2);
+    assert.equal(links[0].textContent, '集团职工名册.xlsx');
+    assert.equal(links[0].className, 'local-file-link');
+    assert.equal(links[1].href, `/api/files/download?path=${encodeURIComponent(file)}`);
+    assert.equal(links[1].attributes.download, '集团职工名册.xlsx');
+  }
+  for (const text of [':codex-file-citation{path="javascript:alert(1)"}', ':codex-file-citation{purpose="output"}', ':codex-file-citation{path="F:/unfinished']) {
+    assert.equal(all(render(text), 'a').length, 0);
+    assert.equal(render(text).textContent, text);
+  }
+  assert.equal(all(render('```\n::codex-file-citation{path="F:/report.xlsx"}\n```'), 'a').length, 0);
+});
+
 test('table ends before other blocks containing pipes and supports multiple tables', () => {
   const root = render('| A |\n| --- |\n| B |\n# 标题 | 文本\n- 列表 | 文本\n> 引用 | 文本\n\n| C |\n| --- |\n| D |');
   assert.equal(all(root, 'table').length, 2);

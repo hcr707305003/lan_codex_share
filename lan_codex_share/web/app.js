@@ -422,12 +422,28 @@ function appendLink(parent, label, rawTarget, originalToken) {
 
 function appendInline(parent, text, allowLineBreaks = false) {
   const source = String(text || '');
-  const pattern = /(`[^`]+`|\[([^\]]+)\]\((<[^>\n]+>|[^)\n]+)\)|\*\*([^\n]+?)\*\*|<br\s*\/?>)/gi;
+  const pattern = /(`[^`]+`|\[([^\]]+)\]\((<[^>\n]+>|[^)\n]+)\)|\*\*([^\n]+?)\*\*|:{1,3}codex-file-citation\{[^}]*\}|<br\s*\/?>)/gi;
   let cursor = 0;
   for (const match of source.matchAll(pattern)) {
     if (match.index > cursor) parent.append(document.createTextNode(source.slice(cursor, match.index)));
     const token = match[0];
-    if (token.startsWith('`')) {
+    if (/^:{1,3}codex-file-citation\{/i.test(token)) {
+      const attribute = token.match(/(?:\{|\s)path\s*=\s*"([^"\r\n]+)"/);
+      const local = attribute && parseLocalFileTarget(attribute[1]);
+      if (local && !/[\r\n<>"|?*]/.test(local.path)) {
+        const card = el('span', 'file-citation');
+        const name = local.path.split(/[\\/]/).pop() || local.path;
+        appendLink(card, name, attribute[1], token);
+        card.append(document.createTextNode(' · '));
+        const download = el('a', 'file-citation-download', '下载');
+        download.href = `/api/files/download?path=${encodeURIComponent(local.path)}`;
+        download.setAttribute('download', name);
+        card.append(download);
+        parent.append(card);
+      } else {
+        parent.append(document.createTextNode(token));
+      }
+    } else if (token.startsWith('`')) {
       const value = token.slice(1, -1);
       const local = parseLocalFileTarget(value);
       // Standalone inline file references are common in Codex answers. Keep
@@ -689,7 +705,7 @@ async function openFilePreview(reference) {
   filePreviewPath.textContent = reference.documentId ? `上传附件 · ${formatBytes(reference.size)}` : reference.path;
   previewState('正在读取文件…');
   try {
-    const endpoint = reference.documentId ? documentEndpoint(reference, true) : fileEndpoint(reference.path);
+    const endpoint = reference.documentId ? documentEndpoint(reference, true) : fileEndpoint(reference.path) + (reference.sheet === undefined ? "" : `&sheet=${Number(reference.sheet)}`);
     const response = await fetch(endpoint, {cache: 'no-store'});
     if (requestId !== previewRequestId) return;
     if (handleUnauthorized(response)) throw new Error('需要密码登录');
@@ -713,6 +729,27 @@ async function openFilePreview(reference) {
           renderMarkdown, onUnauthorized: handleUnauthorized});
         await archiveViewer.open(reference);
         if (requestId !== previewRequestId) return;
+      } else if (data.kind === 'spreadsheet') {
+        const label = el('label', 'archive-sheet-label', '工作表 ');
+        const select = el('select');
+        select.setAttribute('aria-label', '选择工作表');
+        (data.sheets || []).forEach((name, index) => {
+          const option = el('option', '', name); option.value = String(index); select.append(option);
+        });
+        select.value = String(data.sheet);
+        select.addEventListener('change', () => openFilePreview({...reference, sheet: Number(select.value)}));
+        label.append(select); filePreviewBody.append(label);
+        if (data.truncated) filePreviewBody.append(previewWarning('表格内容已截断，请下载原文件查看全部数据。'));
+        const scroll = el('div', 'archive-table-scroll'); scroll.tabIndex = 0;
+        const table = el('table');
+        table.append(el('caption', '', data.sheets?.[data.sheet] || '工作表'));
+        const tbody = el('tbody');
+        for (const values of (data.rows || []).slice(0, 200)) {
+          const row = el('tr');
+          for (const value of values.slice(0, 50)) row.append(el('td', '', String(value ?? '')));
+          tbody.append(row);
+        }
+        table.append(tbody); scroll.append(table); filePreviewBody.append(scroll);
       } else if (data.kind === 'download') {
         filePreviewBody.append(previewWarning('此文件不支持在线预览，请点击右上角下载按钮保存原文件。'));
       } else if (data.kind === 'markdown') {

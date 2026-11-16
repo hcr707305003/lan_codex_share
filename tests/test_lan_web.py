@@ -731,3 +731,29 @@ def test_sse_sends_initial_event(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(2)
+
+def test_standalone_xlsx_preview_and_download(tmp_path):
+    from tests.test_archive_preview import xlsx_bytes
+    path = tmp_path / '名册.xlsx'
+    original = xlsx_bytes()
+    path.write_bytes(original)
+    app, service, server, thread = start_app(tmp_path)
+    url = '/api/files/view?path=' + quote(str(path))
+    try:
+        status, _, body = request(server, 'GET', url)
+        assert status == 200
+        data = json.loads(body)
+        assert data['kind'] == 'spreadsheet'
+        assert data['rows'] == [['公式结果未缓存', '4', '标题']]
+        assert data['sheets'] == ['方案', '空表']
+        status, _, body = request(server, 'GET', url + '&sheet=1')
+        assert status == 200 and json.loads(body)['rows'] == []
+        assert request(server, 'GET', url + '&sheet=99')[0] == 400
+        status, _, body = request(server, 'GET', '/api/files/download?path=' + quote(str(path)))
+        assert status == 200 and body == original
+        path.write_bytes(b'invalid workbook')
+        assert request(server, 'GET', url)[0] == 400
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(2)

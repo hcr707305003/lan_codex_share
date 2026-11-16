@@ -398,6 +398,15 @@ class LanRequestHandler(BaseHTTPRequestHandler):
         except WorkspaceFileError as exc:
             self._error(exc.status, str(exc))
             return
+        if preview.path.suffix.lower() == '.xlsx':
+            try:
+                sheet = int(parse_qs(urlsplit(self.path).query).get('sheet', ['0'])[0])
+                result = run_archive(str(preview.path), 'spreadsheet', sheet=sheet)
+                self._json(HTTPStatus.OK, {**preview.json_value(), **result,
+                    'warning': '仅预览单元格保存值，最多 200 行、50 列；不计算公式或还原格式，请下载原文件查看完整内容。'})
+            except ArchiveError as exc:
+                self._error(exc.status, str(exc))
+            return
         if preview.kind in {"markdown", "code", "download", "archive"}:
             self._json(HTTPStatus.OK, preview.json_value())
             return
