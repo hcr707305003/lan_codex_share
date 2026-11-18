@@ -133,6 +133,8 @@
               <svg><use href="#i-more"></use></svg>
             </button>
             <div class="task-menu" id="task-menu" hidden>
+              <button type="button" id="export-session">导出会话迁移包</button>
+              <button type="button" id="import-session">导入会话迁移包</button>
               <button type="button" id="rename-session"><svg><use href="#i-edit"></use></svg><span>重命名</span></button>
               <button type="button" id="copy-session"><svg><use href="#i-copy"></use></svg><span>复制 Session ID</span></button>
               <button type="button" id="resync"><svg><use href="#i-refresh"></use></svg><span>重新同步</span></button>
@@ -274,6 +276,30 @@
     </form>
   </dialog>
   <script src="/notice.js" defer></script>
+  <dialog id="migration-export-dialog" class="task-dialog" aria-labelledby="migration-export-heading">
+    <form id="migration-export-form">
+      <h2 id="migration-export-heading">选择要导出的会话</h2>
+      <div id="migration-export-session" class="migration-session-list" role="group" aria-label="选择共享会话"></div>
+      <button type="button" id="migration-export-more">全选 / 取消全选</button>
+      <p>仅显示共享任务，可勾选多个会话，每个会话导出独立迁移包。若浏览器询问，请允许多个文件下载。大历史需要更多时间。</p>
+      <p id="migration-export-status" role="status"></p>
+      <div id="migration-export-downloads" class="migration-session-list" aria-label="已生成的下载链接"></div>
+      <footer><button type="button" id="migration-export-close">关闭</button><button type="submit" id="migration-export-submit">导出下载</button></footer>
+    </form>
+  </dialog>
+  <dialog id="migration-dialog" class="task-dialog" aria-labelledby="migration-heading">
+    <form id="migration-form">
+      <header><h2 id="migration-heading">导入原生 Codex 会话</h2></header>
+      <p>导入到运行 Share 的电脑。需在该电脑登录 Codex，并准备好项目代码。历史内原电脑的文件路径不会自动变成可访问文件。</p>
+      <label>会话迁移包 <input id="migration-file" type="file" accept=".zip" required></label>
+      <p id="migration-summary" role="status"></p>
+      <label>目标电脑项目 <select id="migration-project" required></select></label>
+      <label class="migration-session-choice"><input id="migration-copy" type="checkbox"><span>导入为副本：生成新 Session ID，名称加“（副本）”，保留原会话。</span></label>
+      <p>未勾选时保留原 ID，同 ID 会话不会覆盖。导入后加入共享列表，所有能访问此 Share 的用户都可见。原生客户端可能需要刷新或重新打开项目。</p>
+      <p id="migration-error" role="alert"></p>
+      <footer><button type="button" id="migration-close">关闭</button><button type="submit" id="migration-submit" disabled>导入并加入共享</button></footer>
+    </form>
+  </dialog>
   <dialog id="rename-dialog" class="task-dialog" aria-labelledby="rename-title">
     <form id="rename-form">
       <h2 id="rename-title">重命名会话</h2>

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 import argparse
 from contextlib import AbstractContextManager
 import hashlib
@@ -138,7 +140,7 @@ def _chat_service(
         state,
         config.turn_timeout_seconds,
         thread_name=label,
-        remote_url=f"ws://127.0.0.1:{config.app_server_port}",
+        remote_url=None if session_id and ((runtime / "imported_sessions" / session_id).is_file() or UUID(session_id).version == 4) else f"ws://127.0.0.1:{config.app_server_port}",
         strict_resume=True,
         sandbox_mode=config.permission_mode,
     )
@@ -166,6 +168,10 @@ def _build_session_hub(config, runtime: Path, image_store: ImageStore, document_
                          hub.register_session, lambda: hub.thread_ids,
                          config_store=SessionConfigStore(config.config_path) if config.config_path else None,
                          hub=hub)
+    from .session_migration import SessionMigration
+    hub.migration = SessionMigration(tasks, ownership_dir=runtime / 'imported_sessions',
+        registration_client_factory=lambda: CodexClient(config.workspace,
+            StateStore(runtime / 'migration-client.json'), sandbox_mode=config.permission_mode))
     hub.configure_tasks(tasks, factory)
     return hub
 

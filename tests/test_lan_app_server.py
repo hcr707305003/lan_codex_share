@@ -3,6 +3,7 @@ import socket
 import sys
 import time
 
+import psutil
 import pytest
 
 from lan_codex_share.lan_app_server import AppServerHost, AppServerHostError
@@ -101,3 +102,29 @@ def test_app_server_host_stops_spawned_process_tree(tmp_path):
     while host._port_open() and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not host._port_open()
+
+@pytest.mark.parametrize('error', [ProcessLookupError, psutil.NoSuchProcess])
+def test_close_tolerates_child_exit_race(monkeypatch, error):
+    from unittest.mock import Mock
+    host = AppServerHost(command=('unused',))
+    child = Mock()
+    child.terminate.side_effect = error(123)
+    child.kill.side_effect = error(123)
+    host._owned_processes = [child]
+    monkeypatch.setattr(psutil, 'wait_procs', Mock(side_effect=[([], [child]), ([child], []), ([], []), ([], [])]))
+    host.close()
+    host.close()
+    assert host._owned_processes == []
+    child.kill.assert_called_once()
+
+
+def test_close_ignores_repeated_sigint_and_restores_handler(monkeypatch):
+    import signal
+    host = AppServerHost(command=('unused',))
+    original = signal.getsignal(signal.SIGINT)
+    def cleanup():
+        assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN
+        signal.raise_signal(signal.SIGINT)
+    monkeypatch.setattr(host, '_close_processes', cleanup)
+    host.close()
+    assert signal.getsignal(signal.SIGINT) == original

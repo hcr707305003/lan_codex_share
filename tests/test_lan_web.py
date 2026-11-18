@@ -757,3 +757,33 @@ def test_standalone_xlsx_preview_and_download(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(2)
+
+def test_migration_upload_and_export_routes(tmp_path):
+    from unittest.mock import Mock
+    app, service, server, thread = start_app(tmp_path)
+    service.migration = Mock()
+    service.migration.inspect.side_effect = lambda path: {'id':'test', 'name':path.read_text()}
+    service.migration.restore.side_effect = lambda path, project, **kwargs: {'session_id':path.read_text()}
+    package = tmp_path / 'export.zip'; package.write_bytes(b'zip-content')
+    service.migration.prepare_download.return_value = {'url':'/api/migration/download/token','name':'test.zip'}
+    service.migration.download.return_value = (package, 'test.zip')
+    headers = {'Origin': f'http://127.0.0.1:{server.server_port}', 'X-CSRF-Token':app.csrf_token, 'Content-Type':'application/zip'}
+    try:
+        assert request(server,'POST','/api/migration/inspect',b'archive',headers)[0] == 200
+        assert service.migration.inspect.call_count == 1
+        assert request(server,'POST','/api/migration/import?project=C%3A%2Fproject',b'archive',headers)[0] == 200
+        assert service.migration.restore.call_args.args[1] == 'C:/project'
+        status, _, body = request(server,'POST','/api/migration/export',b'{"session_id":"thread-web"}',{**headers,'Content-Type':'application/json'})
+        assert status == 200 and json.loads(body)['url'] == '/api/migration/download/token'
+        status, headers_out, body = request(server,'GET','/api/migration/download/token')
+        assert status == 200 and body == b'zip-content'
+        assert dict(headers_out)['Content-Length'] == str(len(body))
+        status, headers_out, body = request(server,'GET','/api/migration/download/token',headers={'Range':'bytes=4-'})
+        assert status == 206 and body == b'content'
+        assert dict(headers_out)['Content-Range'] == 'bytes 4-10/11'
+        assert request(server,'GET','/api/migration/download/token',headers={'Range':'bytes=999-'})[0] == 416
+        assert package.exists()
+        assert request(server,'POST','/api/migration/import',b'archive',{**headers,'X-CSRF-Token':'wrong'})[0] == 403
+        assert service.migration.restore.call_count == 1
+    finally:
+        server.shutdown();server.server_close();thread.join(2)

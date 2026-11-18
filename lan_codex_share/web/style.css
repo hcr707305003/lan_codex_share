@@ -865,3 +865,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .history-controls button:disabled, .activity-pagination button:disabled { opacity: .6; cursor: wait; }
 .history-controls [hidden], .activity-pagination [hidden] { display: none; }
 .timeline { overflow-anchor: none; }
+
+.migration-session-list { max-height: 45vh; overflow-y: auto; display: grid; gap: 8px; }
+.task-dialog .migration-session-choice { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; overflow-wrap: anywhere; }
+.task-dialog .migration-session-choice input[type=checkbox] { width: 18px; height: 18px; padding: 0; flex: 0 0 18px; margin-top: 2px; }

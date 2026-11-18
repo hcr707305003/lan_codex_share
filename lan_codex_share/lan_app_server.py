@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import psutil
 import shutil
+import signal
 import socket
 import subprocess
 import threading
@@ -102,7 +103,7 @@ class AppServerHost:
         try:
             root = psutil.Process(self.process.pid)
             self._owned_processes = [root, *root.children(recursive=True)]
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError):
             self._owned_processes = []
 
     def start(self) -> None:
@@ -150,6 +151,17 @@ class AppServerHost:
                 self.logger.debug("App Server %s output received", name)
 
     def close(self) -> None:
+        # A second Ctrl+C must not interrupt bounded process cleanup, including
+        # psutil's conversion of a concurrently exited Windows process.
+        main_thread = threading.current_thread() is threading.main_thread()
+        previous = signal.signal(signal.SIGINT, signal.SIG_IGN) if main_thread else None
+        try:
+            self._close_processes()
+        finally:
+            if main_thread:
+                signal.signal(signal.SIGINT, previous)
+
+    def _close_processes(self) -> None:
         process = self.process
         self.process = None
         owned = list(self._owned_processes)
@@ -157,13 +169,13 @@ class AppServerHost:
         for child in reversed(owned):
             try:
                 child.terminate()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
+            except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError):
                 pass
         _, alive = psutil.wait_procs(owned, timeout=5)
         for child in alive:
             try:
                 child.kill()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
+            except (psutil.NoSuchProcess, psutil.AccessDenied, ProcessLookupError):
                 pass
         psutil.wait_procs(alive, timeout=5)
         if process:

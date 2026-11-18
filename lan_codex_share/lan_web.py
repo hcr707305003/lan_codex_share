@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import queue
 import secrets
+import tempfile
 import sys
 import threading
 import time
@@ -205,7 +206,7 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             validate_mutating_request(
                 host=host,
                 origin=self.headers.get("Origin", ""),
-                content_type=self.headers.get("Content-Type", ""),
+                content_type=('application/json' if urlsplit(self.path).path in {'/api/migration/inspect', '/api/migration/import'} and self.headers.get('Content-Type', '').split(';')[0].strip().lower() == 'application/zip' else self.headers.get("Content-Type", "")),
                 csrf=self.headers.get("X-CSRF-Token", ""),
                 expected_csrf=self.app.csrf_token,
                 allowed_hosts=self.app.allowed_hosts,
@@ -312,6 +313,13 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 return
             if path == "/proxy-client.js":
                 self._serve_asset("proxy-client.js", "text/javascript; charset=utf-8")
+                return
+            if path.startswith('/api/migration/download/'):
+                migration = getattr(self.app.service, 'migration', None)
+                if migration is None:
+                    raise ValueError('当前服务不支持会话迁移')
+                file, name = migration.download(path.rsplit('/', 1)[-1])
+                self._stream_migration_download(file, name)
                 return
             if path == "/api/snapshot":
                 query = parse_qs(request_url.query, keep_blank_values=True)
@@ -570,6 +578,48 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             self.app.service.unsubscribe(subscriber)
 
+    def _stream_migration_download(self, path, name):
+        with path.open('rb') as stream:
+            size = os.fstat(stream.fileno()).st_size
+            start, end = 0, size - 1
+            range_header = self.headers.get('Range')
+            if range_header:
+                import re
+                match = re.fullmatch(r'bytes=(\d*)-(\d*)', range_header)
+                try:
+                    if not match or not any(match.groups()):
+                        raise ValueError()
+                    left, right = match.groups()
+                    if left:
+                        start = int(left)
+                        end = min(int(right), end) if right else end
+                    else:
+                        if int(right) <= 0:
+                            raise ValueError()
+                        start = max(0, size - int(right))
+                    if start > end or start >= size:
+                        raise ValueError()
+                except ValueError:
+                    self._send_bytes(416, b'', 'application/octet-stream', {'Content-Range': f'bytes */{size}'})
+                    return
+            length = max(0, end - start + 1)
+            self.send_response(206 if range_header else 200)
+            self.send_header('Content-Type', 'application/zip')
+            self.send_header('Content-Length', str(length))
+            self.send_header('Accept-Ranges', 'bytes')
+            self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + quote(name))
+            if range_header:
+                self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+            self._security_headers('no-store')
+            self.end_headers()
+            stream.seek(start)
+            while length:
+                chunk = stream.read(min(length, 1024 * 1024))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                length -= len(chunk)
+
     def do_POST(self) -> None:
         if self._try_proxy():
             return
@@ -582,12 +632,39 @@ class LanRequestHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0:
                 raise ValueError("请求正文为空")
+            migration_path = urlsplit(self.path).path
+            migration_upload = migration_path in {'/api/migration/inspect', '/api/migration/import'}
+            if migration_upload:
+                migration = getattr(self.app.service, 'migration', None)
+                if migration is None:
+                    raise ValueError('当前服务不支持会话迁移')
+                with tempfile.TemporaryDirectory(prefix='codex-migration-upload-') as folder:
+                    archive = Path(folder) / 'upload.zip'
+                    remaining = length
+                    with archive.open('wb') as f:
+                        while remaining:
+                            chunk = self.rfile.read(min(remaining, 1024 * 1024))
+                            if not chunk:
+                                raise ValueError('请求正文不完整')
+                            f.write(chunk)
+                            remaining -= len(chunk)
+                    self.close_connection = requested_close
+                    if migration_path.endswith('/inspect'):
+                        result = migration.inspect(archive)
+                    else:
+                        project = parse_qs(urlsplit(self.path).query).get('project', [''])[0]
+                        mode = parse_qs(urlsplit(self.path).query).get('mode', ['original'])[0]
+                        if mode not in ('original', 'copy'):
+                            raise ValueError('导入模式无效')
+                        result = migration.restore(archive, project, as_copy=mode == 'copy')
+                    self._json(HTTPStatus.OK, result)
+                return
             if length > self.app.max_request_bytes:
-                self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "请求内容过大")
+                self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, '请求内容过大')
                 return
             raw_body = self.rfile.read(length)
             if len(raw_body) != length:
-                raise ValueError("请求正文不完整")
+                raise ValueError('请求正文不完整')
             self.close_connection = requested_close
             try:
                 payload = json.loads(raw_body.decode("utf-8"))
@@ -637,6 +714,12 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                     self._error(HTTPStatus.CONFLICT, str(exc))
                     return
                 self._json(HTTPStatus.OK, result)
+                return
+            if path == '/api/migration/export':
+                migration = getattr(self.app.service, 'migration', None)
+                if migration is None:
+                    raise ValueError('当前服务不支持会话迁移')
+                self._json(200, migration.prepare_download(payload.get('export_session_id') or payload.get('session_id')))
                 return
             session_id = self.app.service.resolve_session_id(payload.get("session_id"))
             if path == '/api/models/add':

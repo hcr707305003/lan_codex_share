@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import threading
+import psutil
 from typing import Any, Callable
 
 from . import __version__
@@ -60,6 +61,7 @@ class CodexClient:
         self._thread_state_handlers: list[Callable[[bool], None]] = []
         self._notification_handlers: list[Callable[[str, dict[str, Any]], None]] = []
         self._stderr_thread: threading.Thread | None = None
+        self._closing_processes = []
         self._model: str | None = None
         self._reasoning_effort: str | None = None
         self._service_tier: str | None = None
@@ -104,6 +106,7 @@ class CodexClient:
                     encoding="utf-8",
                     errors="replace",
                     bufsize=1,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 )
                 if not self.process.stdin or not self.process.stdout:
                     raise CodexClientError("无法打开 Codex App Server stdio")
@@ -613,10 +616,29 @@ class CodexClient:
 
     def _stop_process(self) -> None:
         rpc, process = self.rpc, self.process
+        owned = list(self._closing_processes)
+        if process and process.poll() is None:
+            try:
+                root = psutil.Process(process.pid)
+                owned.extend([root, *root.children(recursive=True)])
+            except psutil.NoSuchProcess:
+                pass
+        self._closing_processes = owned
         self.rpc = None
         self.process = None
         if rpc:
             rpc.close()
+        for child in reversed(owned):
+            try: child.terminate()
+            except psutil.NoSuchProcess: pass
+        _, alive = psutil.wait_procs(owned, timeout=5)
+        for child in alive:
+            try: child.kill()
+            except psutil.NoSuchProcess: pass
+        _, alive = psutil.wait_procs(alive, timeout=5)
+        if alive:
+            raise CodexClientError('会话进程仍未退出，请重试释放')
+        self._closing_processes = []
         if process and process.poll() is None:
             process.terminate()
             try:

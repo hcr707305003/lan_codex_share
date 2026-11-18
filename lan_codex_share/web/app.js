@@ -890,7 +890,7 @@ function renderUserMessage(item) {
 }
 
 function renderQueue(pending) {
-  const items = Array.isArray(pending) ? pending : [];
+  const items = Array.isArray(pending) ? pending.filter(item => statusValue(item.status) === 'queued') : [];
   queuePanel.hidden = items.length === 0;
   queueCount.textContent = `${items.length} 条消息`;
   if (!items.length) {
@@ -2027,3 +2027,116 @@ authForm.addEventListener('submit', async event => {
 updateSendState();
 syncScrollToBottomButton();
 bootstrapAuthentication();
+
+
+// Native session migration never sends a user turn or copies login credentials.
+const migrationDialog = document.getElementById('migration-dialog');
+const migrationFile = document.getElementById('migration-file');
+const migrationSubmit = document.getElementById('migration-submit');
+const migrationError = document.getElementById('migration-error');
+const migrationProject = document.getElementById('migration-project');
+const migrationCopy = document.getElementById('migration-copy');
+let migrationBusy = false;
+async function migrationUpload(action, file) {
+  const response = await fetch(`/api/migration/${action}?project=${encodeURIComponent(migrationProject.value)}&mode=${migrationCopy.checked ? 'copy' : 'original'}`, {
+    method: 'POST', headers: {'Content-Type': 'application/zip', 'X-CSRF-Token': csrf}, body: file,
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || '迁移失败');
+  return result;
+}
+const exportDialog = document.getElementById('migration-export-dialog');
+const exportSelect = document.getElementById('migration-export-session');
+const exportStatus = document.getElementById('migration-export-status');
+const exportDownloads = document.getElementById('migration-export-downloads');
+const exportSubmit = document.getElementById('migration-export-submit');
+const exportMore = document.getElementById('migration-export-more');
+let exportBusy = false;
+function sharedExportChoices(snapshot) {
+  return (snapshot?.sessions || []).map(item => ({
+    id: item.thread_id, name: item.name || item.thread_id, cwd: item.cwd || '',
+    busy: item.status === 'processing' || Number(item.queue_size || 0) > 0,
+  })).filter(item => item.id);
+}
+document.getElementById('export-session').addEventListener('click', async () => {
+  closeMenu(); exportStatus.textContent = '正在读取共享任务…'; exportSelect.replaceChildren();
+  exportSubmit.disabled = true; exportMore.disabled = true; exportDialog.showModal();
+  try {
+    await refresh();
+    const choices = sharedExportChoices(latestSnapshot);
+    for (const item of choices) {
+      const label = el('label', 'migration-session-choice');
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.value = item.id;
+      checkbox.disabled = item.busy; checkbox.checked = !item.busy && item.id === selectedSessionId;
+      label.append(checkbox, el('span', '', `${item.name}${item.busy ? '（处理中，暂不可导出）' : ''} · ${item.id} · ${item.cwd}`));
+      exportSelect.append(label);
+    }
+    exportStatus.textContent = choices.length ? '请选择要导出的共享会话。' : '暂无共享任务。';
+    exportSubmit.disabled = !choices.some(item => !item.busy); exportMore.disabled = exportSubmit.disabled;
+  } catch(error) { exportStatus.textContent = error.message; }
+});
+exportMore.addEventListener('click', () => {
+  const boxes = [...exportSelect.querySelectorAll('input:not(:disabled)')];
+  const selectAll = boxes.some(box => !box.checked);
+  boxes.forEach(box => {box.checked = selectAll;});
+});
+document.getElementById('migration-export-close').addEventListener('click', () => {if(!exportBusy)exportDialog.close();});
+exportDialog.addEventListener('cancel', event => {if(exportBusy)event.preventDefault();});
+document.getElementById('migration-export-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const boxes = [...exportSelect.querySelectorAll('input:checked:not(:disabled)')];
+  const ids = boxes.map(box => box.value);
+  if (exportBusy) return;
+  if (!ids.length) {exportStatus.textContent = '请至少选择一个共享会话。'; return;}
+  exportBusy = true; exportSubmit.disabled = true; exportMore.disabled = true;
+  boxes.forEach(box => {box.disabled = true;});
+  let completed = 0;
+  const failures = [];
+  try {
+    for (const [index, sid] of ids.entries()) {
+      exportStatus.textContent = `正在导出 ${index + 1}/${ids.length}：${sid}，请稍候…`;
+      try {
+        const response = await fetch('/api/migration/export', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify({export_session_id:sid})});
+        if (!response.ok) throw new Error((await response.json()).error || '导出失败');
+        const download = await response.json();
+        const link = document.createElement('a'); link.href=download.url; link.download=download.name;
+        link.textContent = `下载 / 重试：${download.name}（24 小时内有效）`;
+        exportDownloads.append(link); link.click();
+        completed += 1;
+      } catch(error) {failures.push(`${sid}：${error.message}`);}
+    }
+    exportStatus.textContent = `已将 ${completed}/${ids.length} 个迁移包交给浏览器下载。${failures.length ? '失败：' + failures.join('；') : '如未收到全部文件，请允许本站下载多个文件。'}`;
+  } finally {exportBusy=false;exportSubmit.disabled=false;exportMore.disabled=false;boxes.forEach(box=>{box.disabled=false;});}
+});
+document.getElementById('import-session').addEventListener('click', async () => {
+  closeMenu(); migrationError.textContent=''; migrationSubmit.disabled=true; migrationCopy.checked=false;
+  migrationFile.value=''; document.getElementById('migration-summary').textContent='';
+  migrationDialog.showModal();
+  try {
+    const response=await fetch('/api/sessions/projects'); const data=await response.json();
+    if (!response.ok) throw new Error(data.error || '读取项目失败');
+    migrationProject.replaceChildren();
+    for(const item of data.items || []) { const option=el('option','',item.cwd); option.value=item.cwd; migrationProject.append(option); }
+  } catch(error) { migrationError.textContent=error.message; }
+});
+migrationFile.addEventListener('change', async () => {
+  const file=migrationFile.files[0]; migrationSubmit.disabled=true; migrationError.textContent='';
+  if (!file) return;
+  try {
+    const info=await migrationUpload('inspect',file);
+    if (migrationFile.files[0]!==file) return;
+    document.getElementById('migration-summary').textContent=`${info.name} · ${info.id} · 原目录 ${info.cwd}`;
+    migrationSubmit.disabled=false;
+  } catch(error) { migrationError.textContent=error.message; }
+});
+document.getElementById('migration-close').addEventListener('click',()=>{if(!migrationBusy)migrationDialog.close();});
+migrationDialog.addEventListener('cancel',event=>{if(migrationBusy)event.preventDefault();});
+document.getElementById('migration-form').addEventListener('submit',async event=>{
+  event.preventDefault(); if(migrationBusy || !migrationFile.files[0])return;
+  migrationBusy=true; migrationSubmit.disabled=true; migrationFile.disabled=true; migrationProject.disabled=true; migrationCopy.disabled=true;
+  try {
+    const result=await migrationUpload('import',migrationFile.files[0]);
+    migrationDialog.close(); setNotice(`已导入原生会话 ${result.session_id}`); await refresh();
+  } catch(error) { migrationError.textContent=error.message; }
+  finally {migrationBusy=false; migrationFile.disabled=false; migrationProject.disabled=false; migrationCopy.disabled=false;}
+});
