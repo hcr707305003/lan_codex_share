@@ -4,7 +4,7 @@
 
 同一个 Web 端口还可动态反代本机和局域网 HTTP 服务，无需为每个服务添加子域名或配置条目。
 
-[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.5.5 更新说明](docs/releases/v0.5.5.md)
+[下载版本包](https://github.com/hcr707305003/lan_codex_share/releases/latest) · [配置示例](lan_config.example.toml) · [v0.5.7 更新说明](docs/releases/v0.5.7.md)
 
 **公网部署请设置项目密码，并且只代理可信服务。无密码不是只读：访问者可以发送 Codex 任务、读取授权文件并操作可达的内网服务。**
 
@@ -26,13 +26,17 @@
 
 ### 网页工作台
 
-![LAN Codex Share 网页界面：项目分组、共享会话与 Markdown 回复](docs/screenshots/lan-codex-share-overview.png)
+![LAN Codex Share 网页界面：项目分组、共享会话与 Markdown 回复](https://raw.githubusercontent.com/hcr707305003/lan_codex_share/main/docs/screenshots/lan-codex-share-overview.png?v=20261118)
+
+[查看原图](https://github.com/hcr707305003/lan_codex_share/blob/main/docs/screenshots/lan-codex-share-overview.png)
 
 网页端提供项目与 Session 导航、实时执行过程、流式回复、模型切换和消息输入，多个局域网访问者可以同步查看同一任务进度。
 
 ### ZIP 压缩包预览
 
-![ZIP 内 PDF 预览：紧凑工具栏与可调宽面板](docs/screenshots/lan-codex-share-pdf-preview.png)
+![ZIP 内 PDF 预览：紧凑工具栏与可调宽面板](https://raw.githubusercontent.com/hcr707305003/lan_codex_share/main/docs/screenshots/lan-codex-share-pdf-preview.png?v=20261118)
+
+[查看原图](https://github.com/hcr707305003/lan_codex_share/blob/main/docs/screenshots/lan-codex-share-pdf-preview.png)
 
 返回目录、面包屑和下载入口集中在顶部，PDF 撑满面板剩余高度。PDF 使用浏览器原生阅读器，其内部工具栏、缩略图和缩放样式可能随浏览器而不同。
 
@@ -67,7 +71,9 @@
 
 无需一直手改配置或切换终端，在本机窗口中管理 Share、frpc 和 Cloudflare Tunnel。**从 v0.2.1 起，五平台版本包同时包含桌面控制台和原有 Share/CLI 程序。**
 
-![桌面控制台：服务总览](docs/screenshots/desktop-console-overview.png)
+![桌面控制台：服务总览](https://raw.githubusercontent.com/hcr707305003/lan_codex_share/main/docs/screenshots/desktop-console-overview.png?v=20261118)
+
+[查看原图](https://github.com/hcr707305003/lan_codex_share/blob/main/docs/screenshots/desktop-console-overview.png)
 
 服务卡片显示状态、端口和可点击的访问入口。三个服务可分别启停，支持 FRP 与 Cloudflare 同时映射一个 Share 端口；打开控制台不会自动启动服务或连接隧道。
 
@@ -77,7 +83,9 @@
 - **运行日志**：按服务筛选、搜索、暂停显示及导出。暂停显示不会停止服务；导出或分享前仍需检查业务敏感内容。
 - **外观**：石墨薄荷、暖白森林、午夜蓝、柔和紫四套主题，弹窗与表单统一换肤，设置本机保存。
 
-![桌面控制台：Cloudflare 表单配置](docs/screenshots/desktop-console-cloudflare.png)
+![桌面控制台：Cloudflare 表单配置](https://raw.githubusercontent.com/hcr707305003/lan_codex_share/main/docs/screenshots/desktop-console-cloudflare.png?v=20261118)
+
+[查看原图](https://github.com/hcr707305003/lan_codex_share/blob/main/docs/screenshots/desktop-console-cloudflare.png)
 
 截图来自当前源码，使用演示配置和示例地址，不包含真实凭证或个人项目路径。多条已有 HTTP(S) 域名规则可选择编辑；复杂 YAML 仍可使用高级模式，原有未知字段与注释保留。
 
