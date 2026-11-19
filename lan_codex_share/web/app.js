@@ -1103,6 +1103,27 @@ function appendLabeledPre(body, label, value) {
   body.append(el('pre', '', typeof value === 'string' ? clipText(value) : safeJson(value)));
 }
 
+function appendToolResult(body, label, text) {
+  if (!/^(?:#{1,6} |```|~~~|[-*] |\d+\. |\|.*\|)/m.test(text)) {
+    appendLabeledPre(body, label, text);
+    return;
+  }
+  body.append(el('p', 'secondary', label));
+  const shown = clipText(text);
+  const content = el('div', 'tool-markdown-result');
+  content.append(renderMarkdown(shown)); body.append(content);
+  const source = el('details', 'tool-raw-data');
+  source.append(el('summary', 'secondary', '查看 / 复制 Markdown 原文'));
+  let loaded = false;
+  source.addEventListener('toggle', () => {
+    if (!source.open || loaded) return;
+    loaded = true;
+    appendLabeledPre(source, '', shown);
+    source.querySelectorAll('pre').forEach(enhanceActivityPre);
+  });
+  body.append(source);
+}
+
 function appendToolPayload(body, label, value, parameters = false) {
   let parsed = value;
   if (typeof value === 'string') {
@@ -1121,11 +1142,13 @@ function appendToolPayload(body, label, value, parameters = false) {
     }
   }
   if (!parts.length) {
-    appendLabeledPre(body, label, value);
+    if (!parameters && typeof value === 'string') appendToolResult(body, label, value);
+    else appendLabeledPre(body, label, value);
     return;
   }
   if (!parameters && parsed.isError === true) body.append(el('p', 'tool-output-error', '工具执行失败'));
-  appendLabeledPre(body, label, parts.join('\n\n'));
+  if (parameters) appendLabeledPre(body, label, parts.join('\n\n'));
+  else appendToolResult(body, label, parts.join('\n\n'));
   const raw = el('details', 'tool-raw-data');
   raw.append(el('summary', 'secondary', `查看${label}原始 JSON`));
   let loaded = false;

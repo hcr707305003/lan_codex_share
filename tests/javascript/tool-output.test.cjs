@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../../lan_codex_share/web/app.js'), 'utf8');
 function setup() {
   const el = (tag, cls, text) => ({tag, text, children:[], querySelectorAll() { return []; }, addEventListener(event, fn) { this[event] = fn; }, append(...nodes) { this.children.push(...nodes); }});
-  const ctx = vm.createContext({enhanceActivityPre: () => {}, el, clipText: v => String(v), safeJson: v => JSON.stringify(v, null, 2)});
+  const ctx = vm.createContext({enhanceActivityPre: () => {}, renderMarkdown: text => el("div", "answer", text), el, clipText: v => String(v), safeJson: v => JSON.stringify(v, null, 2)});
   vm.runInContext(source.slice(source.indexOf('function appendLabeledPre('), source.indexOf('function renderActivityBody(')), ctx);
   return {ctx, body:el('div')};
 }
@@ -43,4 +43,16 @@ test('ordinary JSON, false, zero and plain strings are not discarded', () => {
  assert.equal(body.children[1].text,typeof value==='string'?value:JSON.stringify(value,null,2));
  assert.equal(body.children.length,2);
  }
+});
+
+test('Markdown tool result uses renderer and preserves source; code arguments stay literal', () => {
+ const {ctx,body}=setup();
+ const markdown='### Ran Playwright code\n```js\nawait page.click();\n```';
+ ctx.appendToolPayload(body,'结果',{content:[{type:'text',text:markdown}]});
+ assert.equal(body.children[1].children[0].text,markdown);
+ assert.equal(body.children[2].tag,'details');
+ body.children[2].open=true;body.children[2].toggle();
+ assert.equal(body.children[2].children[1].text,markdown);
+ const plain=setup();plain.ctx.appendToolPayload(plain.body,'参数',{code:markdown},true);
+ assert.equal(plain.body.children[1].tag,'pre');
 });
