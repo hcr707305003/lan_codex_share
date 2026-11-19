@@ -64,6 +64,9 @@
       <button class="new-task" id="new-task" type="button" title="添加已有会话或创建新会话">
         <svg><use href="#i-plus"></use></svg><span>新任务</span>
       </button>
+      <button class="new-task conversation-search-entry" id="search-conversation" type="button" title="搜索当前会话的全部历史内容">
+        <svg aria-hidden="true"><use href="#i-search"></use></svg><span>搜索当前会话</span>
+      </button>
       <nav class="task-nav" aria-label="共享任务">
         <div class="nav-label">共享任务</div>
         <div class="project-list" id="project-list" aria-live="polite">
@@ -97,6 +100,7 @@
           </div>
         </div>
         <div class="topbar-actions">
+
           <label class="session-control" id="session-control" for="session-select">
             <span>Session</span>
             <select id="session-select" aria-label="选择共享 Session" disabled>
@@ -242,6 +246,19 @@
     </aside>
   </div>
 
+  <dialog id="conversation-search" class="task-dialog conversation-search-dialog" aria-labelledby="conversation-search-title">
+    <header class="conversation-search-header">
+      <div><h2 id="conversation-search-title">搜索会话内容</h2><p id="conversation-search-scope"></p></div>
+      <button id="conversation-search-close" class="icon-button" type="button" aria-label="关闭搜索"><svg aria-hidden="true"><use href="#i-close"></use></svg></button>
+    </header>
+    <form id="conversation-search-form">
+      <div class="conversation-search-field"><svg aria-hidden="true"><use href="#i-search"></use></svg><input id="conversation-query" type="search" maxlength="200" required placeholder="搜索消息、回复和工具记录…" aria-label="搜索关键词"></div>
+      <button class="task-primary" type="submit">搜索</button>
+    </form>
+    <div class="conversation-search-meta"><p id="conversation-search-status" role="status">输入关键词，查找当前会话的全部历史</p><span>包含未加载消息</span></div>
+    <div id="conversation-search-results" class="conversation-search-results"></div>
+    <footer><span>Esc 关闭</span><button id="conversation-search-more" type="button" hidden>下一页结果</button></footer>
+  </dialog>
   <dialog class="image-lightbox" id="image-lightbox" aria-labelledby="image-lightbox-title">
     <h2 class="sr-only" id="image-lightbox-title">图片预览</h2>
     <button class="icon-button image-lightbox-close" id="image-lightbox-close" type="button" aria-label="关闭图片预览" title="关闭">

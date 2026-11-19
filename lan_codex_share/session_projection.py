@@ -120,6 +120,37 @@ class SessionProjection:
             return {"turn_id": turn_id, "items": deepcopy(items[start:end]), "history": page,
                     "revision": self._turn_revisions.get(turn_id, 0)}
 
+    def search_history(self, query, offset=0):
+        if not isinstance(query, str) or not query.strip() or len(query) > 200:
+            raise ValueError('请输入 1 到 200 个字符')
+        if offset < 0:
+            raise ValueError('分页位置无效')
+        needle = query.casefold()
+        def texts(value):
+            if isinstance(value, str):
+                yield value
+            elif isinstance(value, list):
+                for child in value:
+                    yield from texts(child)
+            elif isinstance(value, dict):
+                for key, child in value.items():
+                    if key not in {'data', 'id', 'threadId', 'turnId', 'status', 'type'}:
+                        yield from texts(child)
+        found, total = [], 0
+        with self._lock:
+            for turn in reversed(self._thread.get('turns', [])):
+                for item in turn.get('items', []):
+                    for text in texts(item):
+                        index = text.casefold().find(needle)
+                        if index < 0:
+                            continue
+                        if offset <= total < offset + 50:
+                            found.append({'turn_id': turn.get('id'), 'type': item.get('type'),
+                                          'text': text[max(0, index - 180):index + len(query) + 600]})
+                        total += 1
+            return {'items': found, 'total': total,
+                    'next': offset + 50 if total > offset + 50 else None}
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {

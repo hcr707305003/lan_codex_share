@@ -227,6 +227,9 @@ class LanSessionHub:
             self._broadcast()
             return selected, service
 
+    def search_history(self, session_id, query, offset=0):
+        return self._service(session_id)[1].projection.search_history(query, offset)
+
     def snapshot(self, session_id: Any = None, history_limit: int | None = None, before: str | None = None) -> dict[str, Any]:
         # Membership fallback and lookup must be atomic with remove_shared().
         # Otherwise an SSE reader can validate an ID, wait for removal, then

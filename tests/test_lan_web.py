@@ -787,3 +787,18 @@ def test_migration_upload_and_export_routes(tmp_path):
         assert service.migration.restore.call_count == 1
     finally:
         server.shutdown();server.server_close();thread.join(2)
+
+def test_conversation_search_http_route(tmp_path):
+    app, service, server, thread = start_app(tmp_path)
+    calls = []
+    def search(session_id, query, offset):
+        calls.append((session_id,query,offset))
+        return {'items':[{'text':'matching js content'}], 'total':1, 'next':None}
+    service.search_history = search
+    try:
+        status, _, body = request(server,'GET','/api/history/search?session_id=thread-web&q=js&offset=0')
+        assert status == 200
+        assert json.loads(body)['items'][0]['text'] == 'matching js content'
+        assert calls == [('thread-web','js',0)]
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=2)

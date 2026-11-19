@@ -967,10 +967,175 @@ function activityTitle(item) {
   return activityInfo[type]?.[1] || type;
 }
 
+async function copyActivityText(text) {
+  try {
+    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return; }
+  } catch (_) { /* HTTP LAN and denied clipboard permissions use selection fallback. */ }
+  const previous = document.activeElement;
+  const input = el('textarea', 'clipboard-fallback');
+  input.value = text;
+  document.body.append(input);
+  try {
+    input.focus(); input.select();
+    if (!document.execCommand('copy')) throw new Error('复制失败，请手动选择文本复制');
+  } finally { input.remove(); previous?.focus(); }
+}
+
+function activityMatches(text, query) {
+  const matches = [];
+  if (!query) return matches;
+  let offset = 0;
+  while (offset <= text.length - query.length) {
+    const index = text.indexOf(query, offset);
+    if (index < 0) break;
+    matches.push(index); offset = index + query.length;
+  }
+  return matches;
+}
+
+let closeActivityMenu = null;
+function showActivityMenu(event, pre, actions) {
+  if (event.shiftKey) return; // Shift + right click keeps the browser menu.
+  event.preventDefault();
+  closeActivityMenu?.();
+  const selection = window.getSelection();
+  const selectedText = selection && pre.contains(selection.anchorNode) && pre.contains(selection.focusNode)
+    ? selection.toString() : '';
+  const menu = el('div', 'activity-context-menu');
+  menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', '内容快捷操作');
+  const controller = new AbortController();
+  const previous = document.activeElement;
+  const close = (restore = false) => {
+    controller.abort(); menu.remove();
+    if (closeActivityMenu === close) closeActivityMenu = null;
+    if (restore && previous?.isConnected) previous.focus();
+  };
+  closeActivityMenu = close;
+  const entries = [
+    [selectedText ? '在会话中搜索选中文字' : '搜索当前会话', () => actions.search(selectedText)],
+    ['复制选中文字', () => actions.copy(selectedText), !selectedText],
+    ['复制本块已显示内容', () => actions.copy(actions.text)],
+  ];
+  for (const [label, action, disabled] of entries) {
+    const button = el('button', '', label); button.type = 'button'; button.disabled = Boolean(disabled);
+    button.setAttribute('role', 'menuitem');
+    button.addEventListener('click', () => { close(true); action(); });
+    menu.append(button);
+  }
+  document.body.append(menu);
+  const bounds = pre.getBoundingClientRect();
+  const x = event.clientX || bounds.left, y = event.clientY || bounds.top;
+  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 4))}px`;
+  const buttons = [...menu.querySelectorAll('button:not(:disabled)')];
+  buttons[0].focus();
+  menu.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); }
+    else if (e.key === 'Tab') close();
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const index = buttons.indexOf(document.activeElement);
+      buttons[(index + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus();
+    }
+  });
+  document.addEventListener('pointerdown', e => { if (!menu.contains(e.target)) close(); }, {capture:true, signal:controller.signal});
+  document.addEventListener('scroll', () => close(), {capture:true, signal:controller.signal});
+  window.addEventListener('resize', () => close(), {signal:controller.signal});
+  window.addEventListener('blur', () => close(), {signal:controller.signal});
+}
+
+function enhanceActivityPre(pre) {
+  if (pre.dataset.searchReady) return;
+  pre.dataset.searchReady = 'true';
+  const text = pre.textContent;
+  const toolbar = el('div', 'activity-text-tools');
+  const search = el('input', 'activity-text-search');
+  search.type = 'search'; search.placeholder = '搜索已显示内容（区分大小写）';
+  search.setAttribute('aria-label', search.placeholder);
+  const count = el('span', 'secondary', ''); count.setAttribute('aria-live', 'polite');
+  const prev = el('button', '', '上一处'); const next = el('button', '', '下一处');
+  const copy = el('button', '', '复制已显示内容');
+  for (const button of [prev, next, copy]) button.type = 'button';
+  let matches = [], selected = 0;
+  function render() {
+    prev.disabled = next.disabled = matches.length === 0;
+    count.textContent = search.value ? `${matches.length ? selected + 1 : 0} / ${matches.length}` : '';
+    pre.replaceChildren();
+    if (!matches.length) { pre.textContent = text; return; }
+    const start = matches[selected];
+    const mark = el('mark', 'activity-search-hit', text.slice(start, start + search.value.length));
+    pre.append(document.createTextNode(text.slice(0, start)), mark,
+      document.createTextNode(text.slice(start + search.value.length)));
+    // Scroll only this result, never move the surrounding conversation.
+    pre.scrollTop += mark.getBoundingClientRect().top - pre.getBoundingClientRect().top - pre.clientHeight / 2;
+  }
+  search.addEventListener('input', () => { matches = activityMatches(text, search.value); selected = 0; render(); });
+  function move(step) { if (matches.length) { selected = (selected + step + matches.length) % matches.length; render(); } }
+  prev.addEventListener('click', () => move(-1)); next.addEventListener('click', () => move(1));
+  search.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); move(event.shiftKey ? -1 : 1); }
+    if (event.key === 'Escape') { event.preventDefault(); search.value = ''; matches = []; render(); }
+  });
+  copy.addEventListener('click', async () => {
+    copy.disabled = true;
+    try { await copyActivityText(text); count.textContent = '已复制'; }
+    catch (_) { count.textContent = '复制失败，请手动选择文本复制'; }
+    finally { copy.disabled = false; }
+  });
+  pre.tabIndex = 0;
+  pre.addEventListener('contextmenu', event => showActivityMenu(event, pre, {
+    text,
+    search(query) {
+      openConversationSearch(query); return;
+    },
+    async copy(value) {
+      try { await copyActivityText(value); count.textContent = '已复制'; }
+      catch (_) { count.textContent = '复制失败，请手动选择文本复制'; }
+    },
+  }));
+  toolbar.append(count, copy);
+  pre.before(toolbar); render();
+}
+
 function appendLabeledPre(body, label, value) {
   if (value === undefined || value === null || value === '') return;
   if (label) body.append(el('p', 'secondary', label));
   body.append(el('pre', '', typeof value === 'string' ? clipText(value) : safeJson(value)));
+}
+
+function appendToolPayload(body, label, value, parameters = false) {
+  let parsed = value;
+  if (typeof value === 'string') {
+    try { parsed = JSON.parse(value); } catch (_) { /* plain output stays plain */ }
+  }
+  const parts = [];
+  if (parameters && parsed && typeof parsed === 'object' && typeof parsed.code === 'string') {
+    parts.push(parsed.code);
+  } else if (!parameters && parsed && typeof parsed === 'object' && Array.isArray(parsed.content)) {
+    for (const block of parsed.content) {
+      if (block?.type === 'text' && typeof block.text === 'string') parts.push(block.text);
+      else if (block?.type === 'resource' && typeof block.resource?.text === 'string') parts.push(block.resource.text);
+      else if (block?.type === 'image' || block?.type === 'audio') {
+        parts.push(`[${block.type === 'image' ? '图片' : '音频'}：${block.mimeType || '未知格式'}，二进制内容请展开原始 JSON 查看]`);
+      } else parts.push(safeJson(block));
+    }
+  }
+  if (!parts.length) {
+    appendLabeledPre(body, label, value);
+    return;
+  }
+  if (!parameters && parsed.isError === true) body.append(el('p', 'tool-output-error', '工具执行失败'));
+  appendLabeledPre(body, label, parts.join('\n\n'));
+  const raw = el('details', 'tool-raw-data');
+  raw.append(el('summary', 'secondary', `查看${label}原始 JSON`));
+  let loaded = false;
+  raw.addEventListener('toggle', () => {
+    if (!raw.open || loaded) return;
+    loaded = true;
+    appendLabeledPre(raw, '', parsed);
+    raw.querySelectorAll('pre').forEach(enhanceActivityPre);
+  });
+  body.append(raw);
 }
 
 function renderActivityBody(item) {
@@ -999,9 +1164,9 @@ function renderActivityBody(item) {
     if (list.childElementCount) body.append(list);
     appendLabeledPre(body, '', item.diff || item.aggregatedOutput || '');
   } else if (type === 'mcpToolCall' || type === 'dynamicToolCall') {
-    appendLabeledPre(body, '参数', item.arguments || item.input);
+    appendToolPayload(body, '参数', item.arguments ?? item.input, true);
     if (item.progress?.length) appendLabeledPre(body, '进度', item.progress.join('\n'));
-    appendLabeledPre(body, '结果', item.result || item.output);
+    appendToolPayload(body, '结果', item.result ?? item.output);
     appendLabeledPre(body, '错误', item.error);
   } else if (type === 'webSearch') {
     if (item.query) body.append(el('p', '', item.query));
@@ -1013,6 +1178,7 @@ function renderActivityBody(item) {
     const payload = Object.fromEntries(Object.entries(item).filter(([key]) => !omitted.has(key)));
     if (Object.keys(payload).length) appendLabeledPre(body, '', payload);
   }
+  body.querySelectorAll('pre').forEach(enhanceActivityPre);
   return body;
 }
 
@@ -1335,6 +1501,7 @@ async function fetchHistoryJson(url, signal) {
   let value = {};
   try { value = await response.json(); } catch (_) { /* handled below */ }
   if (handleUnauthorized(response)) throw new Error(value.error || '需要密码登录');
+  if (response.status === 404 && url.startsWith('/api/history/search?')) throw new Error('当前 Share 后端尚未加载搜索接口，请等待任务结束后重启 Share，再刷新网页重试');
   if (!response.ok) throw new Error(value.error || '无法读取会话历史');
   return value;
 }
@@ -2140,3 +2307,62 @@ document.getElementById('migration-form').addEventListener('submit',async event=
   } catch(error) { migrationError.textContent=error.message; }
   finally {migrationBusy=false; migrationFile.disabled=false; migrationProject.disabled=false; migrationCopy.disabled=false;}
 });
+
+const conversationSearch = document.getElementById('conversation-search');
+let conversationSearchAbort, conversationSearchSession, conversationSearchNext, conversationSearchQuery;
+function openConversationSearch(query = '') {
+  conversationSearchAbort?.abort();
+  conversationSearchSession = selectedSessionId;
+  document.getElementById('conversation-search-scope').textContent = document.getElementById('thread-title').textContent;
+  document.getElementById('conversation-query').value = query;
+  document.getElementById('conversation-search-results').replaceChildren();
+  document.getElementById('conversation-search-status').textContent = '输入关键词，查找当前会话的全部历史';
+  document.getElementById('conversation-search-more').hidden = true;
+  if (!conversationSearch.open) conversationSearch.showModal();
+  document.getElementById('conversation-query').focus();
+  if (query) searchConversation(0);
+}
+async function searchConversation(offset) {
+  conversationSearchAbort?.abort();
+  const controller = conversationSearchAbort = new AbortController();
+  const status = document.getElementById('conversation-search-status');
+  const more = document.getElementById('conversation-search-more');
+  if (!offset) conversationSearchQuery = document.getElementById('conversation-query').value.trim();
+  if (!conversationSearchQuery) return;
+  status.textContent = '正在搜索全部历史…'; more.hidden = true;
+  if (!offset) document.getElementById('conversation-search-results').replaceChildren();
+  try {
+    const params = new URLSearchParams({session_id:conversationSearchSession, q:conversationSearchQuery, offset:String(offset)});
+    const result = await fetchHistoryJson(`/api/history/search?${params}`, controller.signal);
+    if (controller.signal.aborted || !conversationSearch.open) return;
+    const list = document.getElementById('conversation-search-results'); list.replaceChildren();
+    for (const item of result.items) {
+      const card = el('article', 'conversation-search-result');
+      const heading = el('div', 'conversation-result-heading');
+      const types = {userMessage:'我的消息', agentMessage:'Codex 回复', reasoning:'思考摘要', commandExecution:'命令输出', mcpToolCall:'工具记录', dynamicToolCall:'工具记录'};
+      heading.append(el('span', '', types[item.type] || '过程记录'));
+      const copy = el('button', '', '复制片段'); copy.type = 'button';
+      copy.addEventListener('click', async () => {
+        try { await copyActivityText(item.text); copy.textContent = '已复制'; }
+        catch (_) { copy.textContent = '复制失败'; }
+      });
+      heading.append(copy); card.append(heading);
+      const pre = el('pre', 'conversation-result-text');
+      const escaped = conversationSearchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(escaped, 'giu');
+      let start = 0;
+      for (const match of item.text.matchAll(pattern)) {
+        pre.append(document.createTextNode(item.text.slice(start, match.index)), el('mark', '', match[0]));
+        start = match.index + match[0].length;
+      }
+      pre.append(document.createTextNode(item.text.slice(start)));card.append(pre);list.append(card);
+    }
+    conversationSearchNext = result.next; more.hidden = result.next === null;
+    status.textContent = result.total ? `共 ${result.total} 段匹配，当前 ${offset + 1}–${offset + result.items.length}` : '没有找到匹配内容';
+  } catch (error) { if (!controller.signal.aborted) status.textContent = `搜索失败：${error.message}`; }
+}
+document.getElementById('search-conversation').addEventListener('click', () => openConversationSearch());
+document.getElementById('conversation-search-form').addEventListener('submit', event => {event.preventDefault();searchConversation(0);});
+document.getElementById('conversation-search-more').addEventListener('click', () => searchConversation(conversationSearchNext));
+document.getElementById('conversation-search-close').addEventListener('click', () => conversationSearch.close());
+conversationSearch.addEventListener('close', () => conversationSearchAbort?.abort());

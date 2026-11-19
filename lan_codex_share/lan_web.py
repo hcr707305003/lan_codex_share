@@ -331,6 +331,12 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                     session_id, history_limit=limit, before=query.get("before", [None])[0],
                 ))
                 return
+            if path == "/api/history/search":
+                query = parse_qs(request_url.query, keep_blank_values=True)
+                self._json(HTTPStatus.OK, self.app.service.search_history(
+                    query.get("session_id", [None])[0], query.get("q", [""])[0],
+                    int(query.get("offset", ["0"])[0])))
+                return
             if path == "/api/history/activities":
                 query = parse_qs(request_url.query, keep_blank_values=True)
                 self._json(HTTPStatus.OK, self.app.service.activities(

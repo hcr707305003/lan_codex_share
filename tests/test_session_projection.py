@@ -130,3 +130,18 @@ def test_notifications_for_other_threads_are_ignored():
     projection.replace_thread({"id": "thread-1", "turns": []})
     assert not projection.apply_notification("turn/started", {"threadId": "thread-2", "turn": {"id": "turn-x"}})
     assert projection.snapshot()["thread"]["turns"] == []
+
+def test_search_all_history_including_unloaded_turns(tmp_path):
+    projection = SessionProjection(tmp_path)
+    projection.replace_thread({'id':'s','turns':[
+        {'id':str(i),'items':[{'id':str(i),'type':'agentMessage','text':f'Needle record {i}'}]}
+        for i in range(65)]})
+    result = projection.search_history('needle')
+    assert result['total'] == 65
+    assert len(result['items']) == 50
+    assert result['next'] == 50
+    page = projection.search_history('needle',50)
+    assert len(page['items']) == 15
+    assert page['next'] is None
+    assert page['items'][-1]['turn_id'] == '0'
+    assert projection.search_history('not present')['total'] == 0
