@@ -230,6 +230,21 @@ def test_session_release_rejects_active_or_queued_work(tmp_path):
         service.close()
 
 
+def test_history_edit_rejects_reconnect_until_transaction_finishes(tmp_path):
+    service, codex = make_service(tmp_path)
+    try:
+        service.release_session('test')
+        service._history_editing = True
+        with pytest.raises(ValueError, match='正在清理历史'):
+            service.reconnect_session('test')
+        assert service.snapshot()['connection'] == 'released'
+        assert codex.closed == 1
+        service._history_editing = False
+        assert service.reconnect_session('test')
+    finally:
+        service.close()
+
+
 def test_failed_reconnect_keeps_session_released(tmp_path):
     service, codex = make_service(tmp_path)
     try:
@@ -242,6 +257,53 @@ def test_failed_reconnect_keeps_session_released(tmp_path):
         snapshot = service.snapshot()
         assert snapshot["connection"] == "released"
         assert "active writer" in snapshot["last_error"]
+        assert codex.closed == 2
+    finally:
+        service.close()
+
+
+def test_edited_session_reacquires_same_writer_without_reloading_full_history(tmp_path):
+    service, codex = make_service(tmp_path)
+    try:
+        service.release_session('test')
+        service._history_editing = True
+        calls = []
+        def read(include_turns=True):
+            calls.append(include_turns)
+            assert service._history_editing
+            # Simulate slow native resume: snapshot must still acquire queue lock.
+            readable = threading.Event()
+            worker = threading.Thread(target=lambda: (service.snapshot(), readable.set()))
+            worker.start()
+            assert readable.wait(1)
+            worker.join(1)
+            return {'id': 'thread-lan', 'turns': []}
+        codex.read_thread = read
+        service.reconnect_edited_session('test')
+        assert calls == [False]
+        snapshot = service.snapshot()
+        assert snapshot['connection'] == 'connected'
+        assert snapshot['thread']['turns'][0]['id'] == 'history-turn'
+        assert snapshot['thread_id'] == 'thread-lan'
+        assert not service._released
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize('reason', ['writer', 'different-id'])
+def test_edited_session_failed_reacquire_does_not_claim_connection(tmp_path, reason):
+    service, codex = make_service(tmp_path)
+    try:
+        service.release_session('test')
+        service._history_editing = True
+        if reason == 'writer':
+            codex.read_failure = CodexClientError('active writer')
+        else:
+            codex.thread_id = 'another-session'
+        with pytest.raises(ValueError, match='重新接管'):
+            service.reconnect_edited_session('test')
+        assert service._released and service.snapshot()['connection'] == 'released'
+        assert service.thread_id == 'thread-lan'
         assert codex.closed == 2
     finally:
         service.close()

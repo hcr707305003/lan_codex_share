@@ -4,3 +4,4 @@ Pillow==12.3.0
 pypdf==6.19.0
 defusedxml==0.7.1
 tomlkit==0.15.1
+xlrd==2.0.2

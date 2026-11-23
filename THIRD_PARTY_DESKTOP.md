@@ -24,6 +24,7 @@ Corresponding upstream source and notices:
 - PyYAML: <https://github.com/yaml/pyyaml>
 - pypdf (document text extraction): <https://github.com/py-pdf/pypdf>
 - defusedxml (bounded DOCX XML parsing): <https://github.com/tiran/defusedxml>
+- xlrd (legacy XLS cell reading): <https://github.com/python-excel/xlrd>
 
 The bundled document parser license texts are collected into the distribution's
 `licenses` directory alongside the other third-party notices.

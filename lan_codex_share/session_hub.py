@@ -65,7 +65,12 @@ class LanSessionHub:
                 self._default_session_id = next(iter(self.thread_ids), None)
 
     def remove_shared(self, sid, source_ip, persist, remaining):
+        editor = getattr(self, 'history_editor', None)
+        if editor is not None and editor.is_busy(sid):
+            raise ValueError('当前会话正在清理历史，请等待完成后再移出共享')
         with self._service_create_lock:
+            if editor is not None and editor.is_busy(sid):
+                raise ValueError('当前会话正在清理历史，请等待完成后再移出共享')
             with self._lock:
                 service = self._services_by_id.get(sid)
                 metadata = self._catalog_by_id.get(sid) or self._added_by_id.get(sid) or {}

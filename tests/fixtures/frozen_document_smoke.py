@@ -42,6 +42,10 @@ if __name__ == '__main__':
             archive.write(text, 'docs/hello.md')
             archive.write(docx, 'docs/hello.docx')
             archive.write(xlsx, 'docs/values.xlsx')
+        assert '[工作表：Values]' in extract_isolated(xlsx)['text']
+        assert 'A1\t4' in extract_isolated(xlsx)['text']
+        import xlrd
+        assert xlrd.__version__ == '2.0.2'
         listing = run_archive(str(bundle), 'list')
         version = listing['version']
         assert listing['entries'][0]['name'] == 'docs'

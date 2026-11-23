@@ -95,7 +95,7 @@ let maxImages = 4;
 let maxDocumentBytes = 20 * 1024 * 1024;
 let maxDocuments = 5;
 let maxRequestBytes = 256 * 1024 * 1024;
-const documentExtensions = new Set(['md', 'txt', 'docx', 'pdf']);
+const documentExtensions = new Set(['md', 'txt', 'docx', 'pdf', 'xlsx', 'xls']);
 const maxRenderedJson = 100 * 1024;
 const bottomRevealThreshold = 160;
 const historyTimeline = new HistoryTimeline({
@@ -617,6 +617,7 @@ function fileDownloadEndpoint(path) {
 
 function documentEndpoint(reference, preview = false) {
   const params = new URLSearchParams({session_id: reference.sessionId});
+  if (preview && reference.sheet !== undefined) params.set('sheet', String(reference.sheet));
   return `/api/documents/${encodeURIComponent(reference.documentId)}${preview ? '/preview' : ''}?${params}`;
 }
 
@@ -1016,6 +1017,7 @@ function showActivityMenu(event, pre, actions) {
     ['复制选中文字', () => actions.copy(selectedText), !selectedText],
     ['复制本块已显示内容', () => actions.copy(actions.text)],
   ];
+  if (actions.manageHistory) entries.push(['多选删除记录…', actions.manageHistory]);
   for (const [label, action, disabled] of entries) {
     const button = el('button', '', label); button.type = 'button'; button.disabled = Boolean(disabled);
     button.setAttribute('role', 'menuitem');
@@ -1085,6 +1087,7 @@ function enhanceActivityPre(pre) {
   pre.tabIndex = 0;
   pre.addEventListener('contextmenu', event => showActivityMenu(event, pre, {
     text,
+    manageHistory: () => enterInlineHistorySelection(),
     search(query) {
       openConversationSearch(query); return;
     },
@@ -1344,6 +1347,7 @@ function renderTurn(turn, existing) {
     const signature = JSON.stringify(item);
     const cached = previousMessages.get(item.id);
     const node = cached?.signature === signature ? cached.node : create();
+    node.dataset.messageId = String(item.id || '');
     messages.set(item.id, {signature, node});
     return node;
   };
@@ -1376,6 +1380,7 @@ function renderTurn(turn, existing) {
   if (turn.error) nodes.push(el('div', 'turn-status failed', typeof turn.error === 'string' ? turn.error : safeJson(turn.error)));
   section.messageNodes = messages;
   reconcileHistoryNodes(section, nodes);
+  if (typeof syncInlineHistoryCheckboxes === 'function') syncInlineHistoryCheckboxes(section);
   return section;
 }
 
@@ -1525,6 +1530,7 @@ async function fetchHistoryJson(url, signal) {
   try { value = await response.json(); } catch (_) { /* handled below */ }
   if (handleUnauthorized(response)) throw new Error(value.error || '需要密码登录');
   if (response.status === 404 && url.startsWith('/api/history/search?')) throw new Error('当前 Share 后端尚未加载搜索接口，请等待任务结束后重启 Share，再刷新网页重试');
+  if (response.status === 404 && /^\/api\/history\/(manage|delete-status)\?/.test(url)) throw new Error('当前 Share 进程尚未加载历史管理接口。请等待运行中的任务结束后重启 Share 服务，再刷新网页；仅刷新网页无法加载新的后端接口。');
   if (!response.ok) throw new Error(value.error || '无法读取会话历史');
   return value;
 }
@@ -1783,7 +1789,7 @@ function addImageFiles(files) {
     const count = selectedFiles.filter(item => documentExtensions.has(fileExtension(item)) === isDocument).length;
     const documentBytes = selectedFiles.filter(item => documentExtensions.has(fileExtension(item))).reduce((sum, item) => sum + item.size, 0);
     const wireBytes = [...selectedFiles, file].reduce((sum, item) => sum + Math.ceil(item.size / 3) * 4, 1024 * 1024);
-    if (!isDocument && !isImage) errors.push(`${file.name}：支持图片、MD、TXT、DOCX、PDF；旧 DOC 请转为 DOCX。`);
+    if (!isDocument && !isImage) errors.push(`${file.name}：支持图片、MD、TXT、DOCX、PDF、XLSX、XLS；旧 DOC 请转为 DOCX。`);
     else if (!file.size || file.size > (isDocument ? maxDocumentBytes : maxImageBytes)) errors.push(`${file.name}：文件为空或超过 ${fileSize(isDocument ? maxDocumentBytes : maxImageBytes)}。`);
     else if (count >= (isDocument ? maxDocuments : maxImages)) errors.push(`每条消息最多 ${maxDocuments} 个文档、${maxImages} 张图片。`);
     else if ((isDocument && documentBytes + file.size > 100 * 1024 * 1024) || wireBytes > maxRequestBytes) errors.push('本条消息附件总大小超限，请分条发送。');
@@ -1841,6 +1847,7 @@ function selectSession(next) {
     return setNotice('附件正在发送，请完成后再切换会话。');
   }
   if (!next || next === selectedSessionId) return;
+  if (typeof exitInlineHistorySelection === 'function') exitInlineHistorySelection();
   sessionDrafts.set(selectedSessionId, {text: input.value, files: [...selectedFiles]});
   const draft = sessionDrafts.get(next);
   input.value = draft?.text || '';
@@ -2389,3 +2396,217 @@ document.getElementById('conversation-search-form').addEventListener('submit', e
 document.getElementById('conversation-search-more').addEventListener('click', () => searchConversation(conversationSearchNext));
 document.getElementById('conversation-search-close').addEventListener('click', () => conversationSearch.close());
 conversationSearch.addEventListener('close', () => conversationSearchAbort?.abort());
+
+// Selections use native turn IDs; never retain a selection against a changed revision.
+const historyManager = document.getElementById('history-manager');
+const historyStatus = document.getElementById('history-manager-status');
+const historyList = document.getElementById('history-manager-list');
+let historySession, historyRevision, historyPage = [], historyOffset = 0, historyNext = null;
+let historySelection = new Set(), historyBusy = false, historyGeneration = 0;
+let historyBlocked = false;
+const historyButton = id => document.getElementById(`history-manager-${id}`);
+function updateHistoryControls() {
+  historyButton('count').textContent = `已选 ${historySelection.size} 轮`;
+  historyButton('delete').disabled = historyBusy || historyBlocked || !historySelection.size;
+  historyButton('prev').disabled = historyBusy || historyOffset === 0;
+  historyButton('next').disabled = historyBusy || historyNext === null;
+  for (const id of ['select', 'clear', 'commit', 'cancel']) historyButton(id).disabled = historyBusy;
+  for (const input of historyList.querySelectorAll('input')) input.disabled = historyBusy || input.dataset.unavailable === 'true';
+}
+async function loadHistoryManager(offset = 0) {
+  const generation = ++historyGeneration;
+  historyBusy = true; updateHistoryControls(); historyStatus.textContent = '正在读取原生历史…';
+  historyButton('confirm').hidden = true;
+  try {
+    const result = await fetchHistoryJson(`/api/history/manage?${new URLSearchParams({session_id: historySession, offset: String(offset)})}`);
+    if (generation !== historyGeneration) return;
+    if (historyRevision && historyRevision !== result.revision) {
+      historySelection.clear(); historyStatus.textContent = '历史已变化，已清除旧选择，请重新选择。';
+    } else historyStatus.textContent = `共 ${result.total} 轮；可按住 Shift 连选本页范围。`;
+    historyBlocked = Boolean(result.blocked_reason);
+    if (historyBlocked) historyStatus.textContent = result.blocked_reason;
+    else if (result.context_notice) historyStatus.textContent += ` ${result.context_notice}`;
+    historyRevision = result.revision; historyOffset = offset; historyNext = result.next; historyPage = result.items;
+    historyList.replaceChildren(); let anchor = null;
+    historyPage.forEach((item, index) => {
+      const label = el('label', 'history-manager-turn');
+      const input = document.createElement('input'); input.type = 'checkbox'; input.checked = historySelection.has(item.id);
+      input.disabled = !item.id;
+      input.dataset.unavailable = String(!item.id);
+      input.addEventListener('click', event => {
+        const checked = input.checked;
+        if (event.shiftKey && anchor !== null) {
+          for (let i = Math.min(index, anchor); i <= Math.max(index, anchor); i++) {
+            if (historyPage[i].id) checked ? historySelection.add(historyPage[i].id) : historySelection.delete(historyPage[i].id);
+          }
+          historyList.querySelectorAll('input').forEach((box, i) => box.checked = historySelection.has(historyPage[i].id));
+        } else checked ? historySelection.add(item.id) : historySelection.delete(item.id);
+        anchor = index; historyButton('confirm').hidden = true; updateHistoryControls();
+      });
+      const body = el('div'); body.append(el('small', '', item.time), el('p', '', item.text || '（无文字消息的轮次）'));
+      label.append(input, body); historyList.append(label);
+    });
+  } catch (error) { historyStatus.textContent = error.message; }
+  finally { if (generation === historyGeneration) {historyBusy = false; updateHistoryControls();} }
+}
+function openHistoryManager() {
+  if (historyBusy) {historyManager.showModal(); return;}
+  historySession = selectedSessionId; historyRevision = null; historySelection.clear();
+  historyManager.showModal(); loadHistoryManager();
+}
+document.getElementById('manage-history').addEventListener('click', () => enterInlineHistorySelection());
+document.getElementById('timeline').addEventListener('contextmenu', event => {
+  if (event.defaultPrevented || event.shiftKey) return;
+  const block = event.target.closest('.message, .activity-card, .turn-status');
+  if (!block) return;
+  showActivityMenu(event, block, {
+    text: block.innerText || block.textContent || '',
+    copy: text => copyActivityText(text).catch(error => {historyStatus.textContent = error.message;}),
+    search: query => openConversationSearch(query),
+    manageHistory: () => enterInlineHistorySelection(),
+  });
+});
+historyButton('close').addEventListener('click', () => historyManager.close());
+historyButton('prev').addEventListener('click', () => loadHistoryManager(Math.max(0, historyOffset - 50)));
+historyButton('next').addEventListener('click', () => loadHistoryManager(historyNext));
+historyButton('select').addEventListener('click', () => {
+  historyPage.forEach(item => {if (item.id) historySelection.add(item.id);});
+  historyList.querySelectorAll('input').forEach(input => input.checked = true); updateHistoryControls();
+});
+historyButton('clear').addEventListener('click', () => {
+  historySelection.clear(); historyList.querySelectorAll('input').forEach(input => input.checked = false);
+  historyButton('confirm').hidden = true; updateHistoryControls();
+});
+historyButton('delete').addEventListener('click', () => {historyButton('confirm').hidden = false; historyButton('cancel').focus();});
+historyButton('cancel').addEventListener('click', () => historyButton('confirm').hidden = true);
+historyButton('commit').addEventListener('click', async () => {
+  if (historyBusy || !historySelection.size) return;
+  historyBusy = true; updateHistoryControls(); historyStatus.textContent = '正在提交批量删除…';
+  try {
+    const job = await mutateForSession('/api/history/delete', historySession,
+      {turn_ids: [...historySelection], revision: historyRevision, confirmed: true});
+    for (;;) {
+      const result = await fetchHistoryJson(`/api/history/delete-status?${new URLSearchParams({session_id: historySession, job_id: job.id})}`);
+      historyStatus.textContent = result.message;
+      if (result.state === 'error') throw new Error(result.message);
+      if (result.state === 'done') {
+        historySelection.clear(); historyList.replaceChildren(); historyButton('confirm').hidden = true;
+        historyStatus.textContent = `${result.message}。备份：${result.result.backup}`; break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 800));
+    }
+  } catch (error) { historyStatus.textContent = `删除未完成：${error.message}`; }
+  finally {historyBusy = false; updateHistoryControls();}
+});
+
+let inlineHistory = {active: false, busy: false, session: null, revision: null, selected: new Set(), blocked: false, generation: 0};
+const inlineHistoryBar = document.getElementById('inline-history-bar');
+const inlineHistoryStatus = document.getElementById('inline-history-status');
+function inlineHistoryRecordId(message) {
+  return message.classList.contains('activity-group') || message.classList.contains('assistant')
+    ? '__response__' : message.dataset.messageId;
+}
+const inlineControl = name => document.getElementById(`inline-history-${name}`);
+function syncInlineHistoryCheckboxes(section) {
+  const turnId = section.dataset.turnId;
+  const visible = inlineHistory.active && inlineHistory.session === selectedSessionId;
+  const records = [...section.querySelectorAll('.message, .activity-group')];
+  const responseOwner = records.find(node => node.classList.contains('activity-group'))
+    || records.find(node => node.classList.contains('assistant'));
+  records.forEach(message => {
+    const process = message.classList.contains('activity-group');
+    const messageId = inlineHistoryRecordId(message);
+    const key = JSON.stringify([turnId, messageId]);
+    let label = message.historyCheckbox;
+    if (!label) {
+      label = el('label', 'inline-history-checkbox');
+      label.title = messageId === '__response__' ? '选择本轮 Codex 回复（包含查看过程）' : '只选择这条用户消息';
+      const input = document.createElement('input'); input.type = 'checkbox';
+      input.setAttribute('aria-label', label.title);
+      input.addEventListener('change', () => {
+        if (inlineHistory.busy || !turnId || !messageId) return;
+        input.checked ? inlineHistory.selected.add(key) : inlineHistory.selected.delete(key);
+        updateInlineHistoryControls();
+      });
+      message.addEventListener('click', event => {
+        if (!inlineHistory.active || inlineHistory.session !== selectedSessionId || input.disabled) return;
+        if (event.defaultPrevented || event.target.closest('a, button, input, label, select, textarea, summary, [contenteditable], [role="button"]')) return;
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed && selection.toString()) return;
+        input.checked ? inlineHistory.selected.delete(key) : inlineHistory.selected.add(key);
+        updateInlineHistoryControls();
+      });
+      label.append(input); (process ? message.querySelector('summary') : message).prepend(label); message.historyCheckbox = label;
+    }
+    label.hidden = !visible || (messageId === '__response__' && message !== responseOwner);
+    message.classList.toggle('history-selectable', visible);
+    message.classList.toggle('history-selected', visible && inlineHistory.selected.has(key));
+    const input = label.querySelector('input');
+    input.checked = inlineHistory.selected.has(key);
+    input.disabled = inlineHistory.busy || !turnId || !messageId;
+  });
+}
+function updateInlineHistoryControls() {
+  inlineControl('count').textContent = `已选 ${inlineHistory.selected.size} 条`;
+  inlineControl('delete').textContent = inlineHistory.busy ? '正在处理…' : `删除所选${inlineHistory.selected.size ? `（${inlineHistory.selected.size}）` : ''}`;
+  inlineControl('delete').disabled = inlineHistory.busy || inlineHistory.blocked || !inlineHistory.selected.size;
+  for (const key of ['visible', 'clear']) inlineControl(key).disabled = inlineHistory.busy;
+  document.querySelectorAll('#timeline .turn').forEach(section => {
+    syncInlineHistoryCheckboxes(section);
+  });
+}
+function exitInlineHistorySelection() {
+  if (inlineHistory.busy) return;
+  inlineHistory.generation++; inlineHistory.active = false; inlineHistory.selected.clear();
+  inlineHistoryBar.hidden = true; updateInlineHistoryControls();
+}
+async function enterInlineHistorySelection() {
+  if (inlineHistory.busy) {inlineHistoryBar.hidden = false; return;}
+  const generation = ++inlineHistory.generation;
+  inlineHistory.active = true; inlineHistory.session = selectedSessionId;
+  inlineHistory.selected.clear(); inlineHistory.blocked = true;
+  inlineHistoryBar.hidden = false; inlineHistoryStatus.textContent = '正在检查原生历史…'; updateInlineHistoryControls();
+  closeSidebar();
+  try {
+    const result = await fetchHistoryJson(`/api/history/manage?${new URLSearchParams({session_id: inlineHistory.session, offset: '0'})}`);
+    if (generation !== inlineHistory.generation) return;
+    inlineHistory.revision = result.revision; inlineHistory.blocked = Boolean(result.blocked_reason);
+    inlineHistoryStatus.textContent = result.blocked_reason || result.context_notice || '用户消息独立选择；Codex 回复与本轮查看过程共用一个复选框。删除前自动备份，不回退项目文件。';
+  } catch (error) { if (generation === inlineHistory.generation) inlineHistoryStatus.textContent = error.message; }
+  if (generation === inlineHistory.generation) updateInlineHistoryControls();
+}
+inlineControl('exit').addEventListener('click', exitInlineHistorySelection);
+inlineControl('clear').addEventListener('click', () => {inlineHistory.selected.clear(); updateInlineHistoryControls();});
+inlineControl('visible').addEventListener('click', () => {
+  document.querySelectorAll('#timeline .turn').forEach(section => {
+    section.querySelectorAll('.message, .activity-group').forEach(message => {
+      const recordId = inlineHistoryRecordId(message);
+      if (section.dataset.turnId && recordId) inlineHistory.selected.add(JSON.stringify([section.dataset.turnId, recordId]));
+    });
+  });
+  updateInlineHistoryControls();
+});
+inlineControl('delete').addEventListener('click', async () => {
+  if (inlineHistory.busy || inlineHistory.blocked || !inlineHistory.selected.size) return;
+  inlineHistory.busy = true; updateInlineHistoryControls(); inlineHistoryStatus.textContent = '正在提交删除…';
+  try {
+    const records = [...inlineHistory.selected].map(key => {const [turn_id, item_id] = JSON.parse(key); return {turn_id, item_id};});
+    const job = await mutateForSession('/api/history/delete-messages', inlineHistory.session,
+      {records, revision: inlineHistory.revision, confirmed: true});
+    for (;;) {
+      const result = await fetchHistoryJson(`/api/history/delete-status?${new URLSearchParams({session_id: inlineHistory.session, job_id: job.id})}`);
+      inlineHistoryStatus.textContent = result.message;
+      if (result.state === 'error') throw new Error(result.message);
+      if (result.state === 'done') {
+        inlineHistory.selected.clear(); inlineHistory.blocked = true;
+        const connectionNote = result.result.connection === 'connected'
+          ? '已重新接管原会话，可继续发送消息。'
+          : result.result.reconnect_error ? `删除成功，但重新接管失败：${result.result.reconnect_error}` : '会话保持释放状态，重新连接后可继续。';
+        inlineHistoryStatus.textContent = `已删除 ${result.result.deleted_messages} 条记录，备份已保存。${result.result.context_reset ? '旧压缩摘要已清除，近期文字上下文已重建，较早记录仍可查看。' : ''}${connectionNote}`;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 800));
+    }
+  } catch (error) { inlineHistoryStatus.textContent = `删除未完成：${error.message}`; }
+  finally { inlineHistory.busy = false; updateInlineHistoryControls(); }
+});

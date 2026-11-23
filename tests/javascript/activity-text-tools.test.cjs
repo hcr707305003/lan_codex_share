@@ -25,7 +25,7 @@ test('LAN fallback cleans up and restores focus, including copy failure',async()
  }
 });
 test('context menu scopes selection, copies visible block, closes and preserves Shift browser menu',()=>{
- let menu,focused,prevented=false,copied;
+ let menu,focused,prevented=false,copied,managed=false;
  class N {
   constructor(text){this.text=text;this.children=[];this.handlers={};this.style={};this.offsetWidth=216;this.offsetHeight=120;}
   setAttribute(){} append(n){this.children.push(n);} addEventListener(k,f){this.handlers[k]=f;}
@@ -37,7 +37,7 @@ test('context menu scopes selection, copies visible block, closes and preserves 
  const document={activeElement:null,body:{append:n=>{menu=n;}},addEventListener(){}};
  const window={innerWidth:800,innerHeight:600,addEventListener(){},getSelection:()=>({anchorNode:selectedNode,focusNode:selectedNode,toString:()=> 'chosen'})};
  const c=load({document,window,AbortController,el:(tag,cls,text)=>new N(text)});
- const actions={text:'whole',search(){},copy:t=>{copied=t;}};
+ const actions={text:'whole',search(){},copy:t=>{copied=t;},manageHistory(){managed=true;}};
  c.showActivityMenu({shiftKey:true},pre,actions);assert.equal(menu,undefined);
  c.showActivityMenu({clientX:799,clientY:599,preventDefault(){prevented=true;}},pre,actions);
  assert.ok(prevented);assert.equal(menu.children[0].text,'在会话中搜索选中文字');assert.equal(focused,menu.children[0]);
@@ -47,4 +47,7 @@ test('context menu scopes selection, copies visible block, closes and preserves 
  c.showActivityMenu({clientX:20,clientY:20,preventDefault(){}},pre,actions);
  assert.ok(menu.children[1].disabled);
  menu.children[2].handlers.click();assert.equal(copied,'whole');
+ c.showActivityMenu({clientX:20,clientY:20,preventDefault(){}},pre,actions);
+ assert.equal(menu.children[3].text,'多选删除记录…');
+ menu.children[3].handlers.click();assert.ok(managed);assert.ok(menu.removed);
 });

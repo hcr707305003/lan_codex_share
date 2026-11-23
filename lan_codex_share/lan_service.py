@@ -383,6 +383,8 @@ class LanChatService:
 
     def reconnect_session(self, source_ip: str) -> bool:
         with self._queued_lock:
+            if getattr(self, '_history_editing', False):
+                raise ValueError('当前会话正在清理历史，请等待完成后再重新连接')
             if not self._released:
                 return False
             self.projection.set_connection("connecting")
@@ -411,6 +413,40 @@ class LanChatService:
         self._last_error = None
         self._broadcast()
         return True
+
+    def reconnect_edited_session(self, source_ip: str) -> None:
+        """Reacquire the native writer, keeping the already verified paged history.
+
+        Called only by HistoryEditor while its reconnect guard is still active.
+        Native IO stays outside the queue lock so other sessions remain readable.
+        """
+        with self._queued_lock:
+            if not getattr(self, '_history_editing', False) or not self._released:
+                raise ValueError('会话不在历史编辑后的待接管状态')
+            expected_id = self.thread_id
+        try:
+            # read_thread resumes the writer first. Full turns have already been
+            # verified; asking for them again breaks modern long-history limits.
+            thread = self.codex.read_thread(include_turns=False)
+            if thread.get('id') != expected_id:
+                raise ValueError('重新接管返回了不同的 Session ID')
+        except Exception as exc:
+            self.codex.close()
+            self.projection.set_connection('released')
+            self._last_error = f'历史已删除，但重新接管 Session 失败：{exc}'
+            self._last_notice = None
+            self._broadcast()
+            raise ValueError(self._last_error) from exc
+        with self._queued_lock:
+            settings = getattr(self.codex, 'model_settings', None)
+            if isinstance(settings, dict):
+                with self._model_lock:
+                    self._model_settings = {key: settings.get(key) for key in self._model_settings}
+            self._released = False
+            self.projection.set_connection('connected')
+            self._last_notice = f'{source_ip} 已删除所选历史并重新接管当前 Session。'
+            self._last_error = None
+        self._broadcast()
 
     def _work_loop(self) -> None:
         while not self._stop.is_set():

@@ -9,7 +9,6 @@ function setup() {
   const notices = [], sent = [];
   const context = vm.createContext({
     selectedFiles: [], sendingMessage: false, selectedSessionId: 'session-a',
-    documentExtensions: new Set(['md', 'txt', 'docx', 'pdf']),
     allowedImageTypes: new Set(['image/png', 'image/jpeg', 'image/webp']),
     maxDocumentBytes: 20 * 1024 * 1024, maxDocuments: 5,
     maxImages: 4, maxImageBytes: 10 * 1024 * 1024, maxRequestBytes: 256 * 1024 * 1024,
@@ -21,12 +20,25 @@ function setup() {
     setNotice: (...args) => notices.push(args),
   });
   vm.runInContext(
-    source.slice(source.indexOf('function fileExtension('), source.indexOf('function autoGrow('))
+    source.match(/const documentExtensions = new Set\([^;]+;/)[0]
+    + source.slice(source.indexOf('function fileExtension('), source.indexOf('function autoGrow('))
     + source.slice(source.indexOf('async function sendCurrentMessage('), source.indexOf('function closeMenu(')), context);
   return {context, notices, sent};
 }
 
 const file = (name, type = '', size = 128) => ({name, type, size});
+
+test('Excel picker, drag/drop and sending use the document flow even without MIME', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '../../lan_codex_share/web/index.html'), 'utf8');
+  assert.match(html, /id="images"[^>]+accept="[^"]*\.xlsx,\.xls/);
+  const {context, sent, notices} = setup();
+  context.addImageFiles([file('修改后.XLSX'), file('旧版.xls', 'application/vnd.ms-excel')]);
+  assert.equal(context.selectedFiles.length, 2);
+  assert.equal(notices.at(-1)[1], undefined);
+  await context.sendCurrentMessage();
+  assert.deepEqual(Array.from(sent[0][2].documents, item => item.name), ['修改后.XLSX', '旧版.xls']);
+  assert.equal(sent[0][2].images.length, 0);
+});
 
 test('document MIME may be empty; image and document counts are independent', () => {
   const {context, notices} = setup();

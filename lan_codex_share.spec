@@ -7,7 +7,7 @@ from importlib.metadata import distribution
 
 project_root = Path(SPECPATH)
 document_licenses = []
-for package in ('pypdf', 'defusedxml'):
+for package in ('pypdf', 'defusedxml', 'xlrd'):
     dist = distribution(package)
     for file in dist.files or []:
         if 'license' in str(file).lower():

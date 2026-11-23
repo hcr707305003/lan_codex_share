@@ -337,6 +337,15 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                     query.get("session_id", [None])[0], query.get("q", [""])[0],
                     int(query.get("offset", ["0"])[0])))
                 return
+            if path in {'/api/history/manage', '/api/history/delete-status'}:
+                query = parse_qs(request_url.query, keep_blank_values=True)
+                sid = self.app.service.resolve_session_id(query.get('session_id', [None])[0])
+                editor = getattr(self.app.service, 'history_editor', None)
+                if editor is None:
+                    raise ValueError('当前服务未启用原生历史管理')
+                result = editor.listing(sid, int(query.get('offset', ['0'])[0])) if path.endswith('/manage') else editor.status(sid, query.get('job_id', [''])[0])
+                self._json(HTTPStatus.OK, result)
+                return
             if path == "/api/history/activities":
                 query = parse_qs(request_url.query, keep_blank_values=True)
                 self._json(HTTPStatus.OK, self.app.service.activities(
@@ -363,7 +372,8 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 document_id = path[len('/api/documents/'):-len('/preview')] if is_preview else path[len('/api/documents/'):]
                 file_path, record = self.app.document_store.resolve(document_id, session_id)
                 if is_preview and record['extension'] != '.pdf':
-                    self._json(HTTPStatus.OK, self.app.document_store.preview(document_id, session_id))
+                    sheet = int(query.get('sheet', ['0'])[0]) if record['extension'] in {'.xlsx', '.xls'} else 0
+                    self._json(HTTPStatus.OK, self.app.document_store.preview(document_id, session_id, sheet=sheet))
                     return
                 disposition = 'inline' if is_preview else 'attachment'
                 mime = 'application/pdf' if is_preview else 'application/octet-stream'
@@ -728,6 +738,15 @@ class LanRequestHandler(BaseHTTPRequestHandler):
                 self._json(200, migration.prepare_download(payload.get('export_session_id') or payload.get('session_id')))
                 return
             session_id = self.app.service.resolve_session_id(payload.get("session_id"))
+            if path in {'/api/history/delete', '/api/history/delete-messages'}:
+                editor = getattr(self.app.service, 'history_editor', None)
+                if editor is None:
+                    raise ValueError('当前服务未启用原生历史管理')
+                if payload.get('confirmed') is not True:
+                    raise ValueError('请确认删除所选原生历史')
+                options = {'messages': True} if path.endswith('/delete-messages') else {}
+                self._json(HTTPStatus.ACCEPTED, editor.start(session_id, payload.get('records') if options else payload.get('turn_ids'), payload.get('revision'), source_ip, **options))
+                return
             if path == '/api/models/add':
                 catalog = self.app.service.add_model(session_id, payload.get('model'), payload.get('name'))
                 self._json(HTTPStatus.OK, {'model_catalog': catalog})

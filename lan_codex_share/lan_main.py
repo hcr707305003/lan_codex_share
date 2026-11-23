@@ -173,6 +173,8 @@ def _build_session_hub(config, runtime: Path, image_store: ImageStore, document_
         registration_client_factory=lambda: CodexClient(config.workspace,
             StateStore(runtime / 'migration-client.json'), sandbox_mode=config.permission_mode))
     hub.configure_tasks(tasks, factory)
+    from .history_edit import HistoryEditor
+    hub.history_editor = HistoryEditor(hub, hub.migration)
     return hub
 
 

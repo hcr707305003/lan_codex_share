@@ -919,3 +919,45 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .tool-markdown-result { max-height: 520px; overflow: auto; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .tool-markdown-result h3 { margin: 16px 0 8px; }
 .tool-markdown-result h3:first-child { margin-top: 0; }
+.history-manager-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:12px 0; }
+.history-manager-turn { display:flex; align-items:flex-start; gap:12px; padding:14px; margin:8px 0; border:1px solid #454545; border-radius:10px; cursor:pointer; }
+.history-manager-turn:has(input:checked) { border-color:#9fe1c5; background:#24382f; }
+.history-manager-turn input { flex:0 0 auto; margin-top:4px; }
+.history-manager-turn div { min-width:0; }
+.history-manager-turn p { white-space:pre-wrap; overflow-wrap:anywhere; margin:6px 0 0; }
+#history-manager-confirm { padding:14px; border:1px solid #ae7770; border-radius:10px; }
+#history-manager-status { overflow-wrap:anywhere; }
+.inline-history-bar { padding:14px 16px; border:1px solid var(--border-strong); background:var(--panel); border-radius:14px; margin-bottom:12px; box-shadow:0 8px 28px #0003; }
+.inline-history-bar[hidden], .inline-history-checkbox[hidden] { display:none; }
+.inline-history-bar strong { display:inline-flex; align-items:center; font-size:12px; font-weight:600; color:var(--text); }
+.inline-history-bar p { margin:6px 0 12px; color:var(--muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+.inline-history-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.inline-history-actions button { appearance:none; min-height:34px; padding:7px 12px; margin:0; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface); color:var(--text-soft); font:inherit; font-size:12px; font-weight:500; line-height:1.4; cursor:pointer; transition:background .15s, border-color .15s; }
+.inline-history-actions button:hover:not(:disabled) { background:var(--surface-hover); border-color:var(--muted); color:var(--text); }
+.inline-history-actions button:focus-visible, .inline-history-checkbox:has(input:focus-visible) { outline:2px solid var(--info); outline-offset:3px; }
+.inline-history-actions button:disabled { opacity:.4; cursor:not-allowed; }
+#inline-history-exit { margin-left:auto; background:transparent; border-color:transparent; color:var(--muted); }
+.message.history-selectable { position:relative; box-sizing:border-box; padding-left:32px; cursor:pointer; border-radius:8px; }
+.message.history-selectable:has(.inline-history-checkbox input:checked) { background:transparent; }
+.message.assistant.history-selectable > .answer { border-left:2px solid transparent; padding-left:12px; }
+.message.assistant.history-selectable.history-selected > .answer { border-left-color:color-mix(in srgb, var(--success) 70%, transparent); }
+.message.user.history-selectable:has(.inline-history-checkbox input:checked) > .user-bubble { box-shadow:0 0 0 1px color-mix(in srgb, var(--success) 65%, transparent); }
+.message.user.history-selectable { padding-left:0; padding-right:32px; }
+.inline-history-checkbox { position:absolute; top:22px; left:0; display:flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; margin:0; cursor:pointer; border-radius:6px; }
+.message.user > .inline-history-checkbox { left:auto; right:0; }
+.activity-group.history-selectable > summary { position:relative; padding-left:32px; }
+.activity-group.history-selectable > summary > .inline-history-checkbox { top:50%; transform:translateY(-50%); }
+.activity-group.history-selectable > summary:has(.inline-history-checkbox input:checked) { color:var(--success); }
+.inline-history-checkbox:hover { background:var(--surface-hover); }
+.inline-history-checkbox input { appearance:none; position:relative; flex:0 0 auto; width:16px; height:16px; border:1.5px solid var(--muted); border-radius:4px; background:transparent; margin:0; cursor:pointer; }
+.inline-history-checkbox input:checked { background:var(--success); border-color:var(--success); }
+.inline-history-checkbox input:checked::after { content:''; position:absolute; width:4px; height:8px; border:solid #14271b; border-width:0 2px 2px 0; left:4px; top:1px; transform:rotate(45deg); }
+.inline-history-checkbox input:disabled { opacity:.4; cursor:not-allowed; }
+#inline-history-delete { border-color:color-mix(in srgb, var(--danger) 50%, var(--border)); color:var(--danger); background:color-mix(in srgb, var(--danger) 9%, var(--panel)); }
+#inline-history-delete:hover:not(:disabled) { border-color:var(--danger); background:color-mix(in srgb, var(--danger) 17%, var(--panel)); color:var(--danger); }
+@media (max-width:540px) {
+  .inline-history-bar { padding:12px; }
+  .inline-history-actions { gap:6px; }
+  .inline-history-actions button { min-height:38px; padding:7px 9px; }
+}
+@media (prefers-reduced-motion:reduce) { .inline-history-actions button { transition:none; } }

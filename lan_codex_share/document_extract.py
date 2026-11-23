@@ -118,8 +118,11 @@ def extract_document(path: str | Path) -> dict:
             from pypdf import apply_configuration
             with apply_configuration(zlib_maximum_output_length=50 * 1024 * 1024, jbig2dec_binary=None):
                 result = _pdf(path)
+        elif extension in {'.xlsx', '.xls'}:
+            from .spreadsheet_reader import extract_spreadsheet
+            result = extract_spreadsheet(path, 20_000)
         else:
-            raise ValueError('仅支持 MD、TXT、DOCX、PDF；旧 DOC 请转为 DOCX')
+            raise ValueError('仅支持 MD、TXT、DOCX、PDF、XLSX、XLS；旧 DOC 请转为 DOCX')
         _bounded(result['text'])
         if not result['text'].strip():
             raise ValueError('文件没有可提取的文字')

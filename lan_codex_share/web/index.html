@@ -68,6 +68,7 @@
         <svg aria-hidden="true"><use href="#i-search"></use></svg><span>搜索当前会话</span>
       </button>
       <nav class="task-nav" aria-label="共享任务">
+        <button class="new-task" id="manage-history" type="button" title="打开轮次列表，勾选多条后删除原生历史"><svg aria-hidden="true"><use href="#i-search"></use></svg><span>多选删除记录</span></button>
         <div class="nav-label">共享任务</div>
         <div class="project-list" id="project-list" aria-live="polite">
           <button class="task-entry active" type="button" aria-current="page">
@@ -174,6 +175,10 @@
       </div>
 
       <footer class="composer-region">
+        <section id="inline-history-bar" class="inline-history-bar" aria-label="批量删除会话记录" hidden>
+          <div><strong id="inline-history-count">已选 0 条</strong><p id="inline-history-status" role="status">Codex 回复与查看过程共用一个复选框，用户消息独立选择；删除前自动备份。</p></div>
+          <div class="inline-history-actions"><button id="inline-history-visible" type="button">选择当前显示记录</button><button id="inline-history-clear" type="button">清空选择</button><button id="inline-history-delete" type="button" disabled>删除所选</button><button id="inline-history-exit" type="button">退出多选</button></div>
+        </section>
         <section class="task-notifications" id="task-notifications" aria-label="任务结束提示" aria-live="polite" aria-relevant="additions" hidden></section>
         <div class="processing-banner" id="processing-banner" role="status" aria-live="polite" aria-atomic="true" hidden>
           <span class="processing-spinner" aria-hidden="true"></span>
@@ -206,7 +211,7 @@
               <button class="icon-button attach-button" type="button" id="attach-files" title="添加图片或文档" aria-label="添加图片或文档">
                 <svg aria-hidden="true"><use href="#i-paperclip"></use></svg>
               </button>
-              <input id="images" type="file" accept="image/png,image/jpeg,image/webp,.md,.txt,.docx,.pdf" multiple hidden>
+              <input id="images" type="file" accept="image/png,image/jpeg,image/webp,.md,.txt,.docx,.pdf,.xlsx,.xls" multiple hidden>
               <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
             </div>
             <button class="send-button" id="send" type="button" aria-label="发送消息">
@@ -246,6 +251,14 @@
     </aside>
   </div>
 
+  <dialog id="history-manager" class="task-dialog conversation-search-dialog" aria-labelledby="history-manager-title">
+    <header class="conversation-search-header"><div><h2 id="history-manager-title">多选删除记录</h2><p>勾选下方复选框，可跨页多选或按住 Shift 连选。按完整轮次删除，自动备份。</p></div><button id="history-manager-close" type="button" aria-label="关闭历史管理">关闭</button></header>
+    <div class="history-manager-actions"><button id="history-manager-select" type="button">选择本页</button><button id="history-manager-clear" type="button">取消全部选择</button><span id="history-manager-count">已选 0 轮</span></div>
+    <p id="history-manager-status" role="status"></p>
+    <div id="history-manager-list" class="conversation-search-results"></div>
+    <footer><button id="history-manager-prev" type="button">上一页</button><button id="history-manager-next" type="button">下一页</button><button id="history-manager-delete" type="button" disabled>删除所选</button></footer>
+    <div id="history-manager-confirm" hidden><p>将删除所选轮次在 Codex 中的原生历史，并自动保存备份。项目文件不会回退；后续保留的消息可能仍引用旧内容。任务与队列必须为空，且 Codex 必须释放占用。</p><button id="history-manager-cancel" type="button">取消</button><button id="history-manager-commit" type="button">确认删除原生历史</button></div>
+  </dialog>
   <dialog id="conversation-search" class="task-dialog conversation-search-dialog" aria-labelledby="conversation-search-title">
     <header class="conversation-search-header">
       <div><h2 id="conversation-search-title">搜索会话内容</h2><p id="conversation-search-scope"></p></div>

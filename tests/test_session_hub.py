@@ -91,6 +91,22 @@ def test_static_hub_can_register_lazy_session_without_expanding_preview_roots(tm
     assert added[0].closed
 
 
+def test_remove_shared_refuses_history_transaction_before_releasing_or_persisting():
+    from types import SimpleNamespace as NS
+    service = FakeSessionService('session-a', 'Alpha')
+    hub = LanSessionHub([service])
+    hub.start()
+    hub.history_editor = NS(is_busy=lambda sid: sid == 'session-a')
+    persisted = []
+    try:
+        with pytest.raises(ValueError, match='正在清理历史'):
+            hub.remove_shared('session-a', 'test', lambda: persisted.append(True), [])
+        assert service.released == [] and persisted == []
+        assert hub.resolve_session_id('session-a') == 'session-a'
+    finally:
+        hub.close()
+
+
 def test_project_groups_use_directory_identity_not_mixed_project_ids(tmp_path):
     hub = LanSessionHub([FakeSessionService('a', 'A')])
     hub.start()

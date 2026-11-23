@@ -66,6 +66,26 @@ test('DOCX and TXT render inert text, not HTML or Markdown', async () => {
   assert.match(c.filePreviewBody.textContent, /原始版式/);
 });
 
+test('uploaded Excel switches sheets inside the captured session and downloads the original', async () => {
+  const c = setup(), urls = [];
+  c.fetch = async url => {
+    urls.push(url);
+    const sheet = Number(new URL(url, 'http://localhost').searchParams.get('sheet') || 0);
+    return jsonResponse({kind: 'spreadsheet', name: '权限.xlsx', sheets: ['角色', '说明'], sheet,
+      rows: [[sheet ? '第二页' : '<script>内容</script>']], truncated: false});
+  };
+  await c.openFilePreview({...reference, name: '权限.xlsx'});
+  assert.equal(all(c.filePreviewBody, 'td')[0].textContent, '<script>内容</script>');
+  assert.equal(all(c.filePreviewBody, 'script').length, 0);
+  const select = all(c.filePreviewBody, 'select')[0];
+  c.selectedSessionId = 'another';
+  select.value = '1';
+  await select.events.change();
+  assert.equal(urls.at(-1), '/api/documents/id/preview?session_id=s&sheet=1');
+  assert.equal(all(c.filePreviewBody, 'td')[0].textContent, '第二页');
+  assert.equal(c.filePreviewDownload.href, '/api/documents/id?session_id=s');
+});
+
 test('workspace archive metadata enables download without rendering binary content', async () => {
   const c = setup();
   c.fetch = async () => jsonResponse({name: '导出.zip', kind: 'download', size: 123, content: 'binary'});
