@@ -181,10 +181,11 @@ def test_extraction_timeout_and_busy(tmp_path):
 
 def test_text_count_total_and_rollback(tmp_path):
     store = DocumentStore(tmp_path)
-    with pytest.raises(ValueError):
-        store.save_many([payload('a.md', b'a' * 100001)])
-    with pytest.raises(ValueError, match='200,000'):
-        store.save_many([payload(f'{i}.txt', b'b' * 80000) for i in range(3)])
+    large = store.save_many([payload('a.md', b'a' * 100001)])
+    assert large[0]['input_mode'] == 'file'
+    store.delete_many(large)
+    batch = store.save_many([payload(f'{i}.txt', b'b' * 80000) for i in range(3)])
+    store.delete_many(batch)
     with pytest.raises(ValueError):
         store.save_many([payload('a.md', b'a')] * 6)
     assert not list(tmp_path.glob('*.txt'))

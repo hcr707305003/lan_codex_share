@@ -16,6 +16,12 @@ if __name__ == '__main__':
         text = root / 'hello.md'
         text.write_text('hello', encoding='utf-8')
         assert extract_isolated(text)['text'] == 'hello'
+        html = root / 'page.html'
+        html.write_text('<h1>hello</h1><script>alert(1)</script>', encoding='utf-8')
+        assert extract_isolated(html)['text'] == html.read_text(encoding='utf-8')
+        source = root / 'app.vue'
+        source.write_text('x' * 100001, encoding='utf-8')
+        assert extract_isolated(source)['input_mode'] == 'file'
         docx = root / 'hello.docx'
         with zipfile.ZipFile(docx, 'w') as archive:
             archive.writestr('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
@@ -42,6 +48,7 @@ if __name__ == '__main__':
             archive.write(text, 'docs/hello.md')
             archive.write(docx, 'docs/hello.docx')
             archive.write(xlsx, 'docs/values.xlsx')
+        assert extract_isolated(bundle)['input_mode'] == 'file'
         assert '[工作表：Values]' in extract_isolated(xlsx)['text']
         assert 'A1\t4' in extract_isolated(xlsx)['text']
         import xlrd

@@ -66,6 +66,16 @@ test('DOCX and TXT render inert text, not HTML or Markdown', async () => {
   assert.match(c.filePreviewBody.textContent, /原始版式/);
 });
 
+test('uploaded HTML source stays literal and never creates script, image or frame elements', async () => {
+  const c = setup();
+  const html = '<h1>Title</h1><script>alert(1)</script><img src="https://example.invalid/x"><iframe src="/api/events"></iframe>';
+  c.fetch = async () => jsonResponse({name: 'page.html', kind: 'text', content: html, warning: 'HTML 源码预览'});
+  await c.openFilePreview({...reference, name: 'page.html'});
+  assert.equal(all(c.filePreviewBody, 'pre')[0].textContent, html);
+  for (const tag of ['h1', 'script', 'img', 'iframe']) assert.equal(all(c.filePreviewBody, tag).length, 0);
+  assert.equal(c.filePreviewDownload.href, '/api/documents/id?session_id=s');
+});
+
 test('uploaded Excel switches sheets inside the captured session and downloads the original', async () => {
   const c = setup(), urls = [];
   c.fetch = async url => {

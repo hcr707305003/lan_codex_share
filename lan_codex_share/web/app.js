@@ -95,7 +95,7 @@ let maxImages = 4;
 let maxDocumentBytes = 20 * 1024 * 1024;
 let maxDocuments = 5;
 let maxRequestBytes = 256 * 1024 * 1024;
-const documentExtensions = new Set(['md', 'txt', 'docx', 'pdf', 'xlsx', 'xls']);
+const documentExtensions = new Set(['md', 'txt', 'html', 'htm', 'css', 'js', 'ts', 'jsx', 'tsx', 'vue', 'py', 'java', 'go', 'php', 'sh', 'ps1', 'json', 'yaml', 'yml', 'toml', 'xml', 'csv', 'sql', 'log', 'svg', 'zip', 'tar.gz', 'docx', 'pdf', 'xlsx', 'xls']);
 const maxRenderedJson = 100 * 1024;
 const bottomRevealThreshold = 160;
 const historyTimeline = new HistoryTimeline({
@@ -1754,7 +1754,7 @@ function updateSendState() {
   sendButton.disabled = sendingMessage || !connected || (!input.value.trim() && !selectedFiles.length);
 }
 
-function fileExtension(file) { return String(file.name || '').split('.').pop().toLowerCase(); }
+function fileExtension(file) { return String(file.name || '').toLowerCase().endsWith('.tar.gz') ? 'tar.gz' : String(file.name || '').split('.').pop().toLowerCase(); }
 
 function fileSize(bytes) {
   return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.ceil(bytes / 1024))} KB`;
@@ -1789,7 +1789,7 @@ function addImageFiles(files) {
     const count = selectedFiles.filter(item => documentExtensions.has(fileExtension(item)) === isDocument).length;
     const documentBytes = selectedFiles.filter(item => documentExtensions.has(fileExtension(item))).reduce((sum, item) => sum + item.size, 0);
     const wireBytes = [...selectedFiles, file].reduce((sum, item) => sum + Math.ceil(item.size / 3) * 4, 1024 * 1024);
-    if (!isDocument && !isImage) errors.push(`${file.name}：支持图片、MD、TXT、DOCX、PDF、XLSX、XLS；旧 DOC 请转为 DOCX。`);
+    if (!isDocument && !isImage) errors.push(`${file.name}：支持图片、源码、配置、日志、SVG、ZIP、TAR.GZ、MD、TXT、HTML、DOCX、PDF、XLSX、XLS；旧 DOC 请转为 DOCX。`);
     else if (!file.size || file.size > (isDocument ? maxDocumentBytes : maxImageBytes)) errors.push(`${file.name}：文件为空或超过 ${fileSize(isDocument ? maxDocumentBytes : maxImageBytes)}。`);
     else if (count >= (isDocument ? maxDocuments : maxImages)) errors.push(`每条消息最多 ${maxDocuments} 个文档、${maxImages} 张图片。`);
     else if ((isDocument && documentBytes + file.size > 100 * 1024 * 1024) || wireBytes > maxRequestBytes) errors.push('本条消息附件总大小超限，请分条发送。');

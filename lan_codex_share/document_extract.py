@@ -9,6 +9,7 @@ import zipfile
 import psutil
 
 from defusedxml.ElementTree import fromstring
+from .attachment_formats import TEXT_EXTENSIONS, ARCHIVE_EXTENSIONS, FORMAT_HINT, extension_of
 
 
 MAX_TEXT = 100_000
@@ -22,7 +23,7 @@ def _bounded(text: str) -> str:
     return text
 
 
-def _text(path: Path) -> str:
+def _text(path: Path, *, bounded: bool = True) -> str:
     raw = path.read_bytes()
     encodings = ['utf-16'] if raw.startswith((b'\xff\xfe', b'\xfe\xff')) else ['utf-8-sig', 'gb18030']
     for encoding in encodings:
@@ -32,7 +33,7 @@ def _text(path: Path) -> str:
             continue
         if any(ord(ch) < 32 and ch not in '\n\r\t\f' for ch in text):
             raise ValueError('文本包含二进制控制字符')
-        return _bounded(text)
+        return _bounded(text) if bounded else text
     raise ValueError('文本编码无法识别，请另存为 UTF-8')
 
 
@@ -106,12 +107,42 @@ def _pdf(path: Path) -> dict:
     return {'text': '\n\n'.join(blocks), 'warning': warning}
 
 
+def _archive_listing(path):
+    """Read only archive headers; never extract, follow links or run contents."""
+    import tarfile
+    from contextlib import closing
+    lines = []
+    if extension_of(path) == '.zip':
+        owner = zipfile.ZipFile(path)
+        entries = ((entry.filename, entry.file_size) for entry in owner.infolist())
+    else:
+        owner = tarfile.open(path, mode='r|gz')
+        entries = ((entry.name, entry.size) for entry in owner)
+    with closing(owner):
+        for index, (name, size) in enumerate(entries):
+            line = f'{name!r}\t{size} bytes'
+            if index >= 1000 or sum(map(len, lines)) + len(line) > 20000:
+                lines.append('目录预览已省略后续项；完整原包未修改，请读取 local_file。')
+                break
+            lines.append(line)
+    return {'text': '\n'.join(lines) or '空压缩包', 'input_mode': 'file',
+            'warning': '压缩包目录预览；完整原包已提供给 Codex，保留目录结构，不自动解压或执行内容。'}
+
+
 def extract_document(path: str | Path) -> dict:
     path = Path(path)
     try:
-        extension = path.suffix.lower()
-        if extension in {'.md', '.txt'}:
-            result = {'text': _text(path), 'warning': ''}
+        extension = extension_of(path)
+        if extension in TEXT_EXTENSIONS:
+            source = _text(path, bounded=False)
+            file_mode = len(source) > MAX_TEXT
+            warning = '源码/文本预览；不执行代码，不加载外部资源。' if extension not in {'.md', '.txt'} else ''
+            if file_mode:
+                warning = '已自动切换为原文件方式，Codex 需读取完整文件，内容未截断。' + warning
+            result = {'text': '完整原文件已提供，请读取 local_file。' if file_mode else source,
+                      'input_mode': 'file' if file_mode else 'text', 'warning': warning}
+        elif extension in ARCHIVE_EXTENSIONS:
+            result = _archive_listing(path)
         elif extension == '.docx':
             result = {'text': _docx(path), 'warning': '仅提取正文段落和表格，不含图片、批注、修订及完整排版。'}
         elif extension == '.pdf':
@@ -122,7 +153,7 @@ def extract_document(path: str | Path) -> dict:
             from .spreadsheet_reader import extract_spreadsheet
             result = extract_spreadsheet(path, 20_000)
         else:
-            raise ValueError('仅支持 MD、TXT、DOCX、PDF、XLSX、XLS；旧 DOC 请转为 DOCX')
+            raise ValueError('支持' + FORMAT_HINT)
         _bounded(result['text'])
         if not result['text'].strip():
             raise ValueError('文件没有可提取的文字')

@@ -28,6 +28,28 @@ function setup() {
 
 const file = (name, type = '', size = 128) => ({name, type, size});
 
+test('common source, SVG and compound archive extensions use document uploads', async () => {
+  for (const name of ['app.vue', 'data.json', 'config.YAML', 'script.ps1', 'icon.svg', 'project.TAR.GZ', 'project.zip']) {
+    const {context, sent} = setup();
+    context.addImageFiles([file(name)]);
+    assert.equal(context.selectedFiles.length, 1, name);
+    await context.sendCurrentMessage();
+    assert.equal(sent[0][2].documents[0].name, name);
+    assert.equal(sent[0][2].images.length, 0);
+  }
+});
+
+test('HTML picker and drag/drop send source documents with empty or HTML MIME', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '../../lan_codex_share/web/index.html'), 'utf8');
+  assert.match(html, /id="images"[^>]+accept="[^"]*\.html,\.htm/);
+  const {context, sent} = setup();
+  context.addImageFiles([file('页面.HTML'), file('page.htm', 'text/html')]);
+  assert.equal(context.selectedFiles.length, 2);
+  await context.sendCurrentMessage();
+  assert.deepEqual(Array.from(sent[0][2].documents, item => item.name), ['页面.HTML', 'page.htm']);
+  assert.equal(sent[0][2].images.length, 0);
+});
+
 test('Excel picker, drag/drop and sending use the document flow even without MIME', async () => {
   const html = fs.readFileSync(path.join(__dirname, '../../lan_codex_share/web/index.html'), 'utf8');
   assert.match(html, /id="images"[^>]+accept="[^"]*\.xlsx,\.xls/);
